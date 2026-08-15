@@ -123,6 +123,17 @@ pub fn terminal_close(term_state: State<'_, TerminalState>) -> Result<(), String
 /// this running, same as it leaves the dsh server running).
 pub fn kill(term_state: &TerminalState) {
     if let Some(mut session) = term_state.0.lock().unwrap().take() {
-        let _ = session.child.kill();
+        // `session.child.kill()` alone only reaches the shell itself, not
+        // whatever it launched interactively (an npm/python/nested-shell
+        // process) — those would otherwise survive as orphans. Fall back to
+        // the direct kill only if we can't get a pid to hand to the tree-kill
+        // (portable_pty::Child::process_id can return None, e.g. once the
+        // process has already exited on its own).
+        match session.child.process_id() {
+            Some(pid) => crate::server::kill_process_tree(pid),
+            None => {
+                let _ = session.child.kill();
+            }
+        }
     }
 }
