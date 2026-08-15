@@ -305,7 +305,12 @@ pub(crate) fn hide_console(_cmd: &mut Command) {}
 /// child can catch and delay on it, unlike the Windows `/F` path. If that
 /// turns out to matter in practice (e.g. a slow shutdown on stop/restart), a
 /// short grace period followed by `SIGKILL` on the same group is the fix.
-fn kill_process_tree(pid: u32) {
+///
+/// `pub(crate)`: also the terminal dock card's own close/restart/quit path
+/// (terminal.rs) — a `Child::kill()` there would only signal the shell
+/// itself, not whatever it's running (an npm/python/nested-shell process
+/// the user started interactively), leaving those orphaned.
+pub(crate) fn kill_process_tree(pid: u32) {
     if cfg!(target_os = "windows") {
         let mut cmd = Command::new("taskkill");
         cmd.args(["/PID", &pid.to_string(), "/T", "/F"]);

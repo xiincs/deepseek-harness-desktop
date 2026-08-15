@@ -35,12 +35,20 @@ const els = {
   panelCards: document.getElementById("panel-cards"),
   resizePanelCards: document.getElementById("resize-panel-cards"),
   btnToolbarFiles: document.getElementById("btn-toolbar-files"),
+  btnToolbarTerminal: document.getElementById("btn-toolbar-terminal"),
+  dockViewFiles: document.getElementById("dock-view-files"),
+  cardTerminal: document.getElementById("card-terminal"),
+  terminalContainer: document.getElementById("terminal-container"),
+  btnTerminalRestart: document.getElementById("btn-terminal-restart"),
+  btnTerminalClose: document.getElementById("btn-terminal-close"),
   toolbar: document.getElementById("toolbar"),
   windowControls: document.getElementById("window-controls"),
   btnWinMinimize: document.getElementById("btn-win-minimize"),
   btnWinMaximize: document.getElementById("btn-win-maximize"),
   btnWinClose: document.getElementById("btn-win-close"),
   btnFilesCollapse: document.getElementById("btn-files-collapse"),
+  btnAppMenu: document.getElementById("btn-app-menu"),
+  appMenu: document.getElementById("app-menu"),
   cardFiles: document.getElementById("card-files"),
   cardFile: document.getElementById("card-file"),
   panelPreviewTitle: document.getElementById("panel-preview-title"),
@@ -136,6 +144,73 @@ async function refresh() {
     show("error");
     els.errorMessage.textContent = `无法获取状态: ${err}`;
   }
+}
+
+// ── app menu (hamburger, left of the drag region) ──────────────────────
+//
+// Fronts the same five actions menu.rs's tray menu already offers
+// (MENU_OPEN_BROWSER/RESTART/OPEN_DATA_DIR/TOGGLE_AUTOSTART/QUIT) — those
+// are otherwise only reachable via the tray icon on Windows/Linux, since
+// decorations:false leaves no native menu bar for them to live in (see
+// menu.rs's set_menu() macOS-only gate). trigger_menu_action forwards the
+// clicked id straight to lib.rs's handle_menu_action, the same dispatcher
+// the tray's own on_menu_event already calls — no action logic duplicated
+// here, this is only presentation. Not wired up at all on macOS (see
+// init()'s own !IS_MACOS guard below) — the native menu bar already covers
+// this, and the hamburger button itself is hidden there (styles.css
+// body.platform-decorated).
+
+function isAppMenuOpen() {
+  return !els.appMenu.classList.contains("hidden");
+}
+
+async function openAppMenu() {
+  // Re-read on every open rather than caching: the tray's own "开机自动
+  //启动" checkbox can be toggled independently of this menu (or the OS
+  // setting changed outside the app entirely), so a stale cached value
+  // could show a checkmark that no longer matches reality.
+  let enabled = false;
+  try {
+    enabled = await invoke("get_autostart_enabled");
+  } catch {
+    /* leave unchecked rather than block opening the menu over this */
+  }
+  els.appMenu.querySelector(".app-menu-check").classList.toggle("hidden", !enabled);
+  els.appMenu.classList.remove("hidden");
+  els.btnAppMenu.setAttribute("aria-expanded", "true");
+}
+
+function closeAppMenu() {
+  els.appMenu.classList.add("hidden");
+  els.btnAppMenu.setAttribute("aria-expanded", "false");
+}
+
+function initAppMenu() {
+  els.btnAppMenu.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (isAppMenuOpen()) {
+      closeAppMenu();
+    } else {
+      openAppMenu();
+    }
+  });
+
+  for (const item of els.appMenu.querySelectorAll(".app-menu-item")) {
+    item.addEventListener("click", () => {
+      const id = item.dataset.menuId;
+      closeAppMenu();
+      invoke("trigger_menu_action", { id });
+    });
+  }
+
+  // Outside click / Escape — the two standard ways a dropdown expects to
+  // be dismissed without acting on anything.
+  document.addEventListener("click", (event) => {
+    if (isAppMenuOpen() && !els.appMenu.contains(event.target)) closeAppMenu();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && isAppMenuOpen()) closeAppMenu();
+  });
 }
 
 // ── window chrome (per-platform) ────────────────────────────────────────
@@ -333,28 +408,123 @@ function initCardsResizeHandle() {
   });
 }
 
-// ── dock open/closed ────────────────────────────────────────────────────
+// ── dock view switching ─────────────────────────────────────────────────
 //
-// Closed on every launch (not persisted) — the toolbar's 文件 button is a
-// deliberate opt-in each session, not a state to restore. Only the width
-// (once opened) is remembered, via panelWidth/PANEL_WIDTH_KEY above.
+// One dock (#panel), two mutually exclusive views — Files and Terminal
+// share the same toolbar button group for a reason: opening one is meant
+// to replace the other, not stack beside it (unlike Files vs. its own
+// File-preview card, which *are* meant to sit together — see
+// #dock-view-files). Neither is persisted across launches; each toolbar
+// button is a deliberate opt-in per session. Only the dock's width (once
+// opened) is remembered, via panelWidth/PANEL_WIDTH_KEY above.
 
 // `refresh: false` lets a caller that's about to drive its own, carefully
-// ordered refresh (see handleFileMention) show the dock without also
-// kicking off this function's own un-awaited refreshPanel() — two
+// ordered refresh (see handleFileMention) switch to the Files view without
+// also kicking off this function's own un-awaited refreshPanel() — two
 // concurrent, uncoordinated tree renders racing against each other, one of
 // which could win before the caller's own state (e.g. currentPreviewPath)
 // is actually set, would put the exact same stale-selection race right back
-// after fixing it in the caller.
-function setDockOpen(open, { refresh = true } = {}) {
-  els.panel.classList.toggle("hidden", !open);
-  els.resizePanelContent.classList.toggle("hidden", !open);
-  els.btnToolbarFiles.classList.toggle("active", open);
-  if (open && refresh) refreshPanel();
+// after fixing it in the caller. Only meaningful for view: "files" —
+// opening the terminal view already has its own, independent readiness
+// gate (ensureTerminal()) that this option doesn't touch either way.
+function setDockView(view, { refresh = true } = {}) {
+  // view: "files" | "terminal" | null (closed)
+  const filesOpen = view === "files";
+  const terminalOpen = view === "terminal";
+
+  els.btnToolbarFiles.classList.toggle("active", filesOpen);
+  els.dockViewFiles.classList.toggle("hidden", !filesOpen);
+
+  els.btnToolbarTerminal.classList.toggle("active", terminalOpen);
+  els.cardTerminal.classList.toggle("hidden", !terminalOpen);
+
+  els.panel.classList.toggle("hidden", view === null);
+  els.resizePanelContent.classList.toggle("hidden", view === null);
+
+  if (filesOpen && refresh) refreshPanel();
+  if (terminalOpen) {
+    ensureTerminal().then(() => requestAnimationFrame(fitTerminal));
+  }
 }
 
 function toggleDock() {
-  setDockOpen(els.panel.classList.contains("hidden"));
+  setDockView(els.btnToolbarFiles.classList.contains("active") ? null : "files");
+}
+
+// ── terminal ─────────────────────────────────────────────────────────────
+//
+// One singleton xterm.js instance for the card's whole lifetime — closing
+// the card hides it (and, via btn-terminal-close, kills the backing shell),
+// but the Terminal object itself and its scrollback are kept around so
+// reopening doesn't pay xterm's own init cost again. The Rust-side session
+// (terminal.rs) has the same "hide keeps it alive" split: only an explicit
+// close/restart, or the app actually quitting, kills the shell process.
+
+let xterm = null;
+let fitAddon = null;
+// Tracks whether *this renderer* believes a backend shell is alive — reset
+// on close/restart and on the backend's own "terminal-exit" event (e.g. the
+// user typed `exit`), so the next open respawns instead of writing into a
+// dead pty.
+let terminalSpawned = false;
+
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+// No-op while the card is hidden (display:none reports a zero-size box —
+// fitting against that would shrink the pty to 0 cols/rows) or before
+// xterm has ever been opened.
+function fitTerminal() {
+  if (!xterm || !fitAddon || els.cardTerminal.classList.contains("hidden")) return;
+  try {
+    fitAddon.fit();
+  } catch {
+    return;
+  }
+  if (terminalSpawned) {
+    invoke("terminal_resize", { cols: xterm.cols, rows: xterm.rows }).catch(() => {});
+  }
+}
+
+async function ensureTerminal() {
+  if (!xterm) {
+    const style = getComputedStyle(document.documentElement);
+    xterm = new window.XTerm.Terminal({
+      fontFamily: '"SF Mono", "JetBrains Mono", "Fira Code", Consolas, Menlo, monospace',
+      fontSize: 12.5,
+      cursorBlink: true,
+      theme: {
+        background: style.getPropertyValue("--terminal-bg").trim(),
+        foreground: style.getPropertyValue("--terminal-fg").trim(),
+      },
+    });
+    fitAddon = new window.XTerm.FitAddon();
+    xterm.loadAddon(fitAddon);
+    xterm.open(els.terminalContainer);
+    // Raw keystrokes/paste go straight to the pty — the shell on the other
+    // end owns line editing (backspace, history, completion), not us.
+    xterm.onData((data) => {
+      invoke("terminal_write", { data }).catch(() => {});
+    });
+    new ResizeObserver(fitTerminal).observe(els.terminalContainer);
+  }
+  if (terminalSpawned) return;
+  fitTerminal();
+  xterm.clear();
+  try {
+    await invoke("terminal_spawn", { cols: xterm.cols || 80, rows: xterm.rows || 24 });
+    terminalSpawned = true;
+  } catch (err) {
+    xterm.writeln(`\r\n\x1b[31m终端启动失败: ${err}\x1b[0m`);
+  }
+}
+
+function toggleTerminal() {
+  setDockView(els.btnToolbarTerminal.classList.contains("active") ? null : "terminal");
 }
 
 // ── file/git panel ───────────────────────────────────────────────────────
@@ -967,7 +1137,7 @@ function revealSelectedTreeRow() {
 }
 
 async function handleFileMention(absPath) {
-  setDockOpen(true, { refresh: false });
+  setDockView("files", { refresh: false });
 
   const knownWorkspaces = await invoke("get_known_workspaces").catch(() => []);
   const workspace = resolveWorkspaceForPath(knownWorkspaces, absPath);
@@ -1025,9 +1195,14 @@ async function init() {
   initCardsResizeHandle();
   syncCardResizeHandleVisibility();
   initWindowChrome();
-  // macOS uses the native title bar buttons; the custom ones are hidden
-  // (and would only double up with the native traffic lights).
-  if (!IS_MACOS) initWindowControls();
+  // macOS uses the native title bar buttons and native top menu bar; the
+  // custom window controls and the in-window hamburger menu are both
+  // hidden there (see styles.css body.platform-decorated) and would only
+  // double up with chrome that already exists natively.
+  if (!IS_MACOS) {
+    initWindowControls();
+    initAppMenu();
+  }
 
   try {
     const info = await invoke("get_info");
@@ -1041,6 +1216,11 @@ async function init() {
   }
 
   listen("server-status", (event) => render(event.payload));
+  listen("terminal-data", (event) => xterm?.write(base64ToBytes(event.payload)));
+  listen("terminal-exit", () => {
+    terminalSpawned = false;
+    xterm?.writeln("\r\n\x1b[90m[进程已结束]\x1b[0m");
+  });
   els.btnRetry.addEventListener("click", () => {
     els.btnRetry.disabled = true;
     invoke("start_server")
@@ -1065,6 +1245,17 @@ async function init() {
   els.btnLogsStarting.addEventListener("click", toggleLogsStarting);
   els.btnOpenBrowser.addEventListener("click", () => invoke("open_in_browser"));
   els.btnToolbarFiles.addEventListener("click", toggleDock);
+  els.btnToolbarTerminal.addEventListener("click", toggleTerminal);
+  els.btnTerminalRestart.addEventListener("click", async () => {
+    await invoke("terminal_close").catch(() => {});
+    terminalSpawned = false;
+    await ensureTerminal();
+  });
+  els.btnTerminalClose.addEventListener("click", () => {
+    invoke("terminal_close").catch(() => {});
+    terminalSpawned = false;
+    setDockView(null);
+  });
   // Collapses the Files card's tree/picker body without closing the whole
   // dock — independent from #card-file's own close button, per the "each
   // card scrolls/collapses on its own" design.

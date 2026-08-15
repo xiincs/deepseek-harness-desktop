@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>DeepSeek Harness</title>
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="vendor/xterm/xterm.css" />
   </head>
   <body>
     <!--
@@ -47,19 +48,32 @@
       <symbol id="icon-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="6 9 12 15 18 9"></polyline>
       </symbol>
+      <symbol id="icon-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="4" y1="7" x2="20" y2="7"></line>
+        <line x1="4" y1="12" x2="20" y2="12"></line>
+        <line x1="4" y1="17" x2="20" y2="17"></line>
+      </symbol>
+      <symbol id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </symbol>
     </svg>
 
     <div id="app-shell">
       <!--
         No brand lockup here on purpose — the iframed harness content
         already renders its own logo/title, so the shell chrome doesn't
-        repeat it. On Windows/Linux (frameless: decorations:false) this bar
-        carries data-tauri-drag-region so its own empty space (most of its
-        width) moves the window, replacing the OS title bar — see
-        #window-controls below for its replacement minimize/maximize/close.
-        On macOS lib.rs restores the native title bar, so app.js strips the
-        drag region and leaves those custom controls hidden (native traffic
-        lights + title-bar drag take over). #window-controls starts hidden
+        repeat it. The hamburger button on the left is the one exception:
+        not a brand mark, just the entry point for actions that have nowhere
+        else to live on Windows/Linux (no native menu bar — see menu.rs's
+        set_menu() macOS-only gate), otherwise reachable only via the tray
+        icon. On Windows/Linux (frameless: decorations:false) this bar
+        carries data-tauri-drag-region so its own empty space moves the
+        window, replacing the OS title bar — see #window-controls below for
+        its replacement minimize/maximize/close. On macOS lib.rs restores
+        the native title bar (real traffic lights + title-bar drag) and its
+        own native menu bar already covers the hamburger's actions, so
+        app.js hides both the hamburger and the drag region there too (see
+        styles.css body.platform-decorated). #window-controls starts hidden
         in the markup itself so it can never paint alongside the native
         traffic lights before app.js has decided which chrome to use — it
         is revealed only on the frameless platforms.
@@ -70,8 +84,27 @@
         right edge instead of just the edge of whatever's left of the dock.
       -->
       <div id="toolbar" data-tauri-drag-region>
+        <div id="toolbar-left">
+          <div id="app-menu-wrap">
+            <button id="btn-app-menu" class="toolbar-btn" title="菜单" aria-haspopup="true" aria-expanded="false">
+              <svg class="icon"><use href="#icon-menu"></use></svg>
+            </button>
+            <div id="app-menu" class="app-menu hidden" role="menu">
+              <button class="app-menu-item" data-menu-id="open_browser" role="menuitem">在浏览器中打开</button>
+              <button class="app-menu-item" data-menu-id="restart" role="menuitem">重启服务</button>
+              <button class="app-menu-item" data-menu-id="open_data_dir" role="menuitem">打开数据目录</button>
+              <div class="app-menu-sep"></div>
+              <button class="app-menu-item" data-menu-id="toggle_autostart" role="menuitemcheckbox">
+                <svg class="icon app-menu-check hidden"><use href="#icon-check"></use></svg>
+                <span>开机自动启动</span>
+              </button>
+              <div class="app-menu-sep"></div>
+              <button class="app-menu-item" data-menu-id="quit" role="menuitem">退出</button>
+            </div>
+          </div>
+        </div>
         <div id="toolbar-actions">
-          <button id="btn-toolbar-terminal" class="toolbar-btn" disabled title="终端（即将推出）">
+          <button id="btn-toolbar-terminal" class="toolbar-btn" title="终端">
             <svg class="icon"><use href="#icon-terminal"></use></svg>
           </button>
           <button id="btn-toolbar-diff" class="toolbar-btn" disabled title="Diff（即将推出）">
@@ -153,47 +186,71 @@
 
         <aside id="panel" class="hidden">
           <div id="panel-cards">
-            <section id="card-files" class="dock-card">
+            <!--
+              Groups Files + File-preview into one unit so the Terminal view
+              (a sibling below, mutually exclusive with this one — see
+              setDockView in app.js) can hide both together with a single
+              class toggle, without touching either card's own internal
+              open/closed state (btn-preview-close etc. still work exactly
+              as before, just now on a card that may itself be hidden by
+              this wrapper).
+            -->
+            <div id="dock-view-files">
+              <section id="card-files" class="dock-card">
+                <div class="dock-card-header">
+                  <span class="dock-card-title">文件</span>
+                  <div class="dock-card-actions">
+                    <button id="btn-panel-refresh" title="刷新文件树与 Git 状态">
+                      <svg class="icon"><use href="#icon-refresh"></use></svg>
+                    </button>
+                    <button id="btn-files-collapse" title="收起">
+                      <svg class="icon"><use href="#icon-chevron-up"></use></svg>
+                    </button>
+                  </div>
+                </div>
+                <div class="select-wrap">
+                  <select id="panel-workspace-select" title="选择要在文件树中查看的工作区"></select>
+                  <svg class="select-chevron"><use href="#icon-chevron-down"></use></svg>
+                </div>
+                <div id="panel-tree"></div>
+              </section>
+
+              <!--
+                Only meaningful (and only shown — see syncCardResizeHandleVisibility
+                in app.js) while both cards are in their normal state: collapsed
+                Files already claims this space for File via CSS (see the
+                #card-files.card-collapsed ~ #card-file rule), and there's
+                nothing to split against a closed File card.
+              -->
+              <div id="resize-panel-cards" class="resize-handle resize-handle-h hidden" role="separator" aria-orientation="horizontal"></div>
+
+              <section id="card-file" class="dock-card hidden">
+                <div class="dock-card-header">
+                  <div id="panel-preview-title-group">
+                    <span id="panel-preview-title"></span>
+                    <span id="panel-preview-dirty-dot" class="hidden" title="有未保存的改动">●</span>
+                  </div>
+                  <div class="dock-card-actions">
+                    <button id="btn-preview-revert" class="hidden" title="放弃改动，还原为已保存内容">还原</button>
+                    <button id="btn-preview-save" class="hidden" title="保存改动 (Ctrl+S)">保存</button>
+                    <button id="btn-preview-close" title="关闭预览">✕</button>
+                  </div>
+                </div>
+                <div id="panel-preview-body"></div>
+              </section>
+            </div>
+
+            <section id="card-terminal" class="dock-card hidden">
               <div class="dock-card-header">
-                <span class="dock-card-title">文件</span>
+                <span class="dock-card-title">终端</span>
                 <div class="dock-card-actions">
-                  <button id="btn-panel-refresh" title="刷新文件树与 Git 状态">
+                  <button id="btn-terminal-restart" title="重启终端">
                     <svg class="icon"><use href="#icon-refresh"></use></svg>
                   </button>
-                  <button id="btn-files-collapse" title="收起">
-                    <svg class="icon"><use href="#icon-chevron-up"></use></svg>
-                  </button>
+                  <button id="btn-terminal-close" title="关闭终端">✕</button>
                 </div>
               </div>
-              <div class="select-wrap">
-                <select id="panel-workspace-select" title="选择要在文件树中查看的工作区"></select>
-                <svg class="select-chevron"><use href="#icon-chevron-down"></use></svg>
-              </div>
-              <div id="panel-tree"></div>
-            </section>
-
-            <!--
-              Only meaningful (and only shown — see syncCardResizeHandleVisibility
-              in app.js) while both cards are in their normal state: collapsed
-              Files already claims this space for File via CSS (see the
-              #card-files.card-collapsed ~ #card-file rule), and there's
-              nothing to split against a closed File card.
-            -->
-            <div id="resize-panel-cards" class="resize-handle resize-handle-h hidden" role="separator" aria-orientation="horizontal"></div>
-
-            <section id="card-file" class="dock-card hidden">
-              <div class="dock-card-header">
-                <div id="panel-preview-title-group">
-                  <span id="panel-preview-title"></span>
-                  <span id="panel-preview-dirty-dot" class="hidden" title="有未保存的改动">●</span>
-                </div>
-                <div class="dock-card-actions">
-                  <button id="btn-preview-revert" class="hidden" title="放弃改动，还原为已保存内容">还原</button>
-                  <button id="btn-preview-save" class="hidden" title="保存改动 (Ctrl+S)">保存</button>
-                  <button id="btn-preview-close" title="关闭预览">✕</button>
-                </div>
-              </div>
-              <div id="panel-preview-body"></div>
+              <div id="terminal-container"></div>
             </section>
           </div>
           <footer id="footer"></footer>
@@ -218,6 +275,7 @@
       Prism's .token.* classes this replaced).
     -->
     <script src="vendor/codemirror/codemirror-bundle.min.js"></script>
+    <script src="vendor/xterm/xterm-bundle.min.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
