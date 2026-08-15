@@ -374,7 +374,23 @@ let lockedWorkspace = localStorage.getItem(LOCKED_WORKSPACE_KEY) || null;
 // on every poll (see refreshTreeAndGitStatus's replaceChildren), so without
 // this the collapsed state would be lost and folders would re-expand within
 // PANEL_POLL_MS of being collapsed.
+//
+// TreeEntry.path is workspace-RELATIVE (see panel.rs), so these keys are
+// only meaningful for the workspace they were collapsed in — switching
+// workspaces must clear the set, or workspace B would silently inherit A's
+// collapse state for any same-relative-path directory (the same reason the
+// workspace-switch handler closes the open preview).
 const collapsedDirs = new Set();
+
+// Which workspace the last-rendered tree belonged to: lockedWorkspace when
+// pinned, else the auto-follow resolution. A change clears collapsedDirs.
+let renderedWorkspaceKey = null;
+
+function applyWorkspaceChange(workspaceKey) {
+  if (workspaceKey === null || workspaceKey === renderedWorkspaceKey) return;
+  renderedWorkspaceKey = workspaceKey;
+  collapsedDirs.clear();
+}
 
 function renderTreeNode(entry, gitMap, container) {
   const row = document.createElement("div");
@@ -800,6 +816,13 @@ async function refreshTreeAndGitStatus() {
     }
   }
   renderWorkspaceOptions(await knownWorkspacesPromise, autoLabel);
+
+  // Collapse keys are workspace-relative: a different workspace means a
+  // fresh tree, so its collapse state starts empty. Covers both the manual
+  // picker and the auto-follow re-resolution above (autoLabel is the path
+  // get_active_workspace resolved; a transient failure keeps the old state
+  // rather than wiping it).
+  applyWorkspaceChange(lockedWorkspace ?? autoLabel);
 
   try {
     const treeArgs = { overridePath: lockedWorkspace };
