@@ -418,7 +418,16 @@ function initCardsResizeHandle() {
 // button is a deliberate opt-in per session. Only the dock's width (once
 // opened) is remembered, via panelWidth/PANEL_WIDTH_KEY above.
 
-function setDockView(view) {
+// `refresh: false` lets a caller that's about to drive its own, carefully
+// ordered refresh (see handleFileMention) switch to the Files view without
+// also kicking off this function's own un-awaited refreshPanel() — two
+// concurrent, uncoordinated tree renders racing against each other, one of
+// which could win before the caller's own state (e.g. currentPreviewPath)
+// is actually set, would put the exact same stale-selection race right back
+// after fixing it in the caller. Only meaningful for view: "files" —
+// opening the terminal view already has its own, independent readiness
+// gate (ensureTerminal()) that this option doesn't touch either way.
+function setDockView(view, { refresh = true } = {}) {
   // view: "files" | "terminal" | null (closed)
   const filesOpen = view === "files";
   const terminalOpen = view === "terminal";
@@ -432,7 +441,7 @@ function setDockView(view) {
   els.panel.classList.toggle("hidden", view === null);
   els.resizePanelContent.classList.toggle("hidden", view === null);
 
-  if (filesOpen) refreshPanel();
+  if (filesOpen && refresh) refreshPanel();
   if (terminalOpen) {
     ensureTerminal().then(() => requestAnimationFrame(fitTerminal));
   }
@@ -1056,6 +1065,126 @@ async function refreshPanel() {
 // itself is never torn down, so this interval simply runs for the app's
 // whole lifetime.
 const PANEL_POLL_MS = 6000;
+
+// ── file-mention bridge (harness iframe → dock) ─────────────────────────
+//
+// lib.rs's inject_file_mention_bridge injects a capture-phase click
+// listener directly into the harness iframe's document (WebView2's
+// AddScriptToExecuteOnDocumentCreated) — the harness itself has no
+// postMessage channel of its own and isn't this repo's source to add one
+// to. That injected script intercepts a file-mention button's default
+// "open" action and posts {source:"dsh-desktop", type:"open-file-mention",
+// path: "<absolute path>"} to window.top instead. This listener is the
+// other end of that bridge.
+//
+// The path arrives absolute (it's the button's own title attribute, an OS
+// path), but every panel command (get_workspace_tree/get_editable_preview/…)
+// takes a path relative to whichever workspace root is active — see
+// get_editable_preview's doc comment in lib.rs. So the workspace the file
+// belongs to has to be resolved here, from the absolute path, before
+// showPreview can be called at all.
+
+function normalizeForCompare(p) {
+  return p.replace(/\\/g, "/").toLowerCase();
+}
+
+// Longest-root-prefix wins, so a workspace nested inside another workspace's
+// directory (however unusual) still resolves to the more specific one
+// rather than whichever happened to come first in the list.
+function resolveWorkspaceForPath(knownWorkspaces, absPath) {
+  const target = normalizeForCompare(absPath);
+  let best = null;
+  for (const ws of knownWorkspaces) {
+    const root = normalizeForCompare(ws.path).replace(/\/+$/, "");
+    if (target === root || target.startsWith(root + "/")) {
+      if (!best || root.length > normalizeForCompare(best.path).length) best = ws;
+    }
+  }
+  return best;
+}
+
+// Same persistence side effects as the manual workspace picker's own change
+// handler above — just driven programmatically instead of by a user
+// selecting an <option>. Deliberately skips that handler's own
+// confirmDiscardIfNeeded() gate: showPreview() (called right after by
+// handleFileMention) already runs that same check against the file this
+// click is actually trying to open, so gating here too would just ask twice
+// for one discard decision.
+function lockWorkspace(path) {
+  lockedWorkspace = path;
+  localStorage.setItem(LOCKED_WORKSPACE_KEY, path);
+  els.panelWorkspaceSelect.value = path;
+}
+
+// Reveals a just-selected tree row: expands every collapsed ancestor
+// (renderTreeNode's own hasChildren click handler is the only thing that
+// ever collapses one — a user fold from an earlier look at the tree) so the
+// row is actually in the visible/scrollable flow, not sitting inside a
+// display:none .tree-children, then scrolls it into view.
+function revealSelectedTreeRow() {
+  const row = els.panelTree.querySelector(".tree-row-selected");
+  if (!row) return;
+  let node = row.parentElement;
+  while (node && node !== els.panelTree) {
+    if (node.classList.contains("tree-children")) {
+      node.classList.remove("collapsed");
+      const caretRow = node.previousElementSibling;
+      if (caretRow) caretRow.classList.add("tree-expanded");
+    }
+    node = node.parentElement;
+  }
+  row.scrollIntoView({ block: "nearest" });
+}
+
+async function handleFileMention(absPath) {
+  setDockView("files", { refresh: false });
+
+  const knownWorkspaces = await invoke("get_known_workspaces").catch(() => []);
+  const workspace = resolveWorkspaceForPath(knownWorkspaces, absPath);
+  if (!workspace) {
+    // No known workspace claims this path — nothing to lock onto or
+    // convert a relative path against; surface it the same way an
+    // unreadable preview already does rather than silently doing nothing.
+    // Tears down whatever was previously open the same way closePreview()
+    // does — otherwise a stale editor instance (and its currentPreviewPath)
+    // would linger and get silently re-fetched/re-mounted by the next poll,
+    // clobbering this error message with unrelated old content.
+    currentPreviewPath = null;
+    destroyEditor();
+    els.panelPreviewTitle.textContent = absPath;
+    els.panelPreviewTitle.title = absPath;
+    els.cardFile.classList.remove("hidden");
+    els.panelPreviewBody.textContent = "该文件不属于任何已知工作区";
+    return;
+  }
+
+  const root = workspace.path.replace(/\\/g, "/").replace(/\/+$/, "");
+  const relPath = absPath.replace(/\\/g, "/").slice(root.length).replace(/^\/+/, "");
+
+  if (workspace.path !== lockedWorkspace) {
+    lockWorkspace(workspace.path);
+  }
+  // showPreview() must land first — it's the only place that sets
+  // currentPreviewPath, and renderTreeNode (inside refreshTreeAndGitStatus)
+  // marks .tree-row-selected by comparing against that same value. Doing
+  // this in the other order renders the tree against whatever was
+  // *previously* open, so revealSelectedTreeRow() below would find a stale
+  // row (or none at all) instead of the file this click just opened.
+  await showPreview(relPath);
+  await refreshTreeAndGitStatus();
+  revealSelectedTreeRow();
+}
+
+window.addEventListener("message", (event) => {
+  // Only the harness iframe itself is a legitimate sender — the injected
+  // script runs inside that document and nowhere else, and nothing else in
+  // this page's world has a reason to post this message shape.
+  if (event.source !== els.harnessFrame.contentWindow) return;
+  const data = event.data;
+  if (!data || data.source !== "dsh-desktop" || data.type !== "open-file-mention") return;
+  if (typeof data.path !== "string" || !data.path) return;
+  handleFileMention(data.path);
+});
 
 // ── init ─────────────────────────────────────────────────────────────────
 

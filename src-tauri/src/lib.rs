@@ -399,6 +399,81 @@ fn disable_devtools(win: &tauri::WebviewWindow) {
 #[cfg(not(all(windows, not(debug_assertions))))]
 fn disable_devtools(_win: &tauri::WebviewWindow) {}
 
+/// Intercepts clicks on the harness's own file-mention buttons (e.g. a
+/// message referencing `index.html` renders one inline) and redirects them
+/// into this shell's own file dock instead of their default "open" action.
+///
+/// The harness is a plain remote page with no Tauri IPC access (see the
+/// module doc comment) and ships no `postMessage` channel of its own to
+/// piggyback on (see `panel.rs`'s "active workspace" section) — its source
+/// (`deepseek-ai/deepseek-harness`) isn't part of this repo either, so
+/// there's no click handler here to edit directly. `AddScriptToExecuteOnDocumentCreated`
+/// runs in every document WebView2 creates, including this iframe's, which
+/// makes the origin boundary a non-issue: the script executes as same-origin
+/// content of the page it's injected into, same as the harness's own
+/// scripts, and the resulting `postMessage` is exactly the kind of
+/// cross-origin signal that boundary was always meant to allow through —
+/// nothing here grants the harness page any *new* capability (no IPC, no
+/// filesystem access), it only ever gets to ask its own parent window to
+/// open something the parent already has every right to open.
+///
+/// Matched on `aria-label`/`title` shape (a "打开 <path>" label alongside a
+/// `title` holding that same absolute path) rather than the button's CSS
+/// class: that class is bundler-hashed (CSS Modules) and free to change on
+/// every harness rebuild, while the label text is the actual user-facing
+/// contract. Capture-phase so this runs before the harness's own click
+/// handler on the same button can act — `stopPropagation` then keeps that
+/// handler from ever seeing the event at all, not just from acting after us.
+#[cfg(windows)]
+fn inject_file_mention_bridge(win: &tauri::WebviewWindow) {
+    use webview2_com::AddScriptToExecuteOnDocumentCreatedCompletedHandler;
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller;
+    use windows::core::HSTRING;
+
+    const SCRIPT: &str = r#"(function () {
+  if (window.top === window) return;
+  document.addEventListener(
+    "click",
+    function (event) {
+      var el = event.target;
+      while (el && el !== document.body) {
+        if (el.tagName === "BUTTON") {
+          var label = el.getAttribute("aria-label") || "";
+          var path = el.getAttribute("title") || "";
+          if (label.indexOf("打开 ") === 0 && path) {
+            event.preventDefault();
+            event.stopPropagation();
+            window.top.postMessage({ source: "dsh-desktop", type: "open-file-mention", path: path }, "*");
+            return;
+          }
+        }
+        el = el.parentElement;
+      }
+    },
+    true,
+  );
+})();"#;
+
+    let _ = win.with_webview(|webview| {
+        let controller: ICoreWebView2Controller = webview.controller();
+        let result: webview2_com::Result<()> = (|| {
+            let core = unsafe { controller.CoreWebView2() }?;
+            AddScriptToExecuteOnDocumentCreatedCompletedHandler::wait_for_async_operation(
+                Box::new(move |handler| unsafe {
+                    core.AddScriptToExecuteOnDocumentCreated(&HSTRING::from(SCRIPT), &handler)
+                        .map_err(Into::into)
+                }),
+                Box::new(|_result, _id| Ok(())),
+            )
+        })();
+        if let Err(e) = result {
+            eprintln!("[dsh-desktop] failed to inject file-mention bridge script: {e}");
+        }
+    });
+}
+#[cfg(not(windows))]
+fn inject_file_mention_bridge(_win: &tauri::WebviewWindow) {}
+
 /// Routes every outbound `http(s)` link — `target="_blank"`/`window.open`
 /// (`NewWindowRequested`) and plain top-level navigation
 /// (`NavigationStarting`) alike — to the system's default browser instead of
@@ -629,6 +704,7 @@ pub fn run() {
                 disable_context_menu(&win);
                 disable_zoom_control(&win);
                 disable_devtools(&win);
+                inject_file_mention_bridge(&win);
                 install_external_link_handlers(&handle, &win);
             }
 
