@@ -1,183 +1,104 @@
-# deepseek-harness-desktop
+<div align="center">
+
+# DeepSeek Harness Desktop
+
+**A real desktop app for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)**
+
+No more losing it in a sea of browser tabs — one icon, double-click to open, and it keeps
+running quietly in the background when you close the window.
 
 [中文](README.md) | English
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/xiincs/deepseek-harness-desktop)](https://github.com/xiincs/deepseek-harness-desktop/releases/latest)
-[![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078D6)](#)
-[![Platform: macOS](https://img.shields.io/badge/platform-macOS-000000)](#)
-[![Platform: Linux](https://img.shields.io/badge/platform-Linux-FCC624)](#)
-[![Built with Tauri 2](https://img.shields.io/badge/built%20with-Tauri%202-24C8DB)](https://v2.tauri.app/)
+[![Downloads](https://img.shields.io/github/downloads/xiincs/deepseek-harness-desktop/total)](https://github.com/xiincs/deepseek-harness-desktop/releases)
+[![Windows](https://img.shields.io/badge/-Windows-0078D6?logo=windows&logoColor=white)](#-download)
+[![macOS](https://img.shields.io/badge/-macOS-000000?logo=apple&logoColor=white)](#-download)
+[![Linux](https://img.shields.io/badge/-Linux-FCC624?logo=linux&logoColor=black)](#-download)
 
-### A native desktop app for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) — **Tauri-based, 1/3 the installer size of the Electron alternative**
+**[⬇️ Download now](https://github.com/xiincs/deepseek-harness-desktop/releases/latest)** ·
+[Features](#-what-it-does) ·
+[FAQ](#-faq)
 
-It wraps the harness's own web server (`dsh web`) in a native window: one-click start, tray-resident,
-automatic crash recovery, auto-update, and the same data under `~/.dsh` as the browser version.
-Because it uses the system's own WebView2 instead of bundling a copy of Chromium, the installer is
-much smaller — and the embedded page is deliberately **not** granted Tauri IPC access, so it can't
-reach your filesystem.
+<!--
+  Demo GIF placeholder: a 10-15s clip of "double-click the icon → window opens → open the
+  file panel and preview/edit a file → close the window and bring it back from the tray"
+  would replace the static screenshot below.
+-->
 
-| | This app (Tauri) | Typical Electron wrapper |
+<img src="docs/screenshots/app-running.png" alt="DeepSeek Harness Desktop running" width="960">
+
+</div>
+
+---
+
+## ✨ What is this
+
+DeepSeek Harness ships as a web app — great on its own, but still just another browser tab:
+easy to close by accident, easy to lose in a pile of other tabs, gone after a restart until you
+dig it back up.
+
+**DeepSeek Harness Desktop** turns it into an actual app: pin it to your taskbar or Dock like
+any other program, double-click to open, and closing the window doesn't mean quitting — it sits
+quietly in your system tray, one click away, exactly where you left it.
+
+## 🚀 What it does
+
+- **Double-click and go**: open the app and it gets everything running in the background for
+  you — no terminal, no ports to figure out.
+- **Closing isn't quitting**: hitting the close button just hides the window; work keeps going.
+  Only "Quit" from the tray actually exits.
+- **Same data as the web version**: sessions and settings live in one shared place — switch
+  freely between the browser version and the desktop app with nothing to sync or lose.
+- **File panel**: pop open a file tree on the side, click any file to preview, edit, and save it
+  right there, changes highlighted inline — no more tabbing out to a separate editor.
+- **Built-in terminal**: need to run a command? It's already in the app, no extra terminal
+  window needed.
+- **Recovers from crashes on its own**: if the background service dies unexpectedly, the app
+  restarts it automatically; if that fails too, it tells you why instead of leaving you guessing.
+- **Tells you about updates**: checks for a newer version on launch and installs it with one
+  click — no need to go hunting on the releases page.
+- **Small and fast**: uses your system's own browser engine instead of bundling a full Chromium
+  like many similar apps do, so the installer is much smaller and it opens faster.
+
+## ⬇️ Download
+
+Head to the **[Releases page](https://github.com/xiincs/deepseek-harness-desktop/releases/latest)**
+and grab the installer for your system:
+
+| Platform | Installer | Notes |
 |---|---|---|
-| Windows installer | **54 MB** | 158 MB |
-| Runtime engine | System WebView2 | Bundled Chromium |
-| Embedded page permissions | No IPC access (disabled by default) | Depends on implementation |
+| Windows | `.exe` | Signed, auto-updates, just double-click to install |
+| macOS | `.dmg` | First launch needs a one-time manual allow in System Settings → Privacy & Security (expected — not enrolled in the Apple Developer program) |
+| Linux | `.deb` | `dpkg -i` or open with your system's package installer |
 
-macOS (`.dmg`) and Linux (`.deb`) builds are also published with every release; the Windows
-installer is signed and wired into auto-update. The macOS/Linux builds are **unsigned and
-unnotarized** (no Apple Developer account) — macOS needs a one-time manual allow in
-System Settings → Privacy & Security, Linux installs normally via `dpkg -i` or your package
-manager, and neither currently participates in auto-update — you'll need to download new
-versions manually.
-
-## Screenshots
+> macOS and Linux builds don't auto-update yet — check back here for new versions.
 
 <p align="center">
-  <img src="docs/screenshots/app-boot.png" width="480" alt="Boot page while dsh starts">
-  &nbsp;&nbsp;
-  <img src="docs/screenshots/app-running.png" width="480" alt="DeepSeek Harness running inside the desktop app">
+  <img src="docs/screenshots/app-boot.png" alt="Boot page" width="400">
 </p>
 
-**[⬇️ Download the latest release](https://github.com/xiincs/deepseek-harness-desktop/releases/latest)**
+## ❓ FAQ
 
-## Features
+**Is this an official product?**
+No. DeepSeek Harness itself is maintained by the official team; this desktop wrapper is an
+independent, community-built app that solves one specific problem — the web version being
+inconvenient to live with day to day.
 
-- One-click start: launches the `dsh` web server and loads the harness UI automatically.
-- Shared data: sessions, storage and configuration live under `~/.dsh` (`$DSH_HOME`), exactly like
-  the browser version.
-- Smart ports: if a `dsh` server is already listening on `127.0.0.1:3080` the app attaches to it
-  instead of starting a second instance; if the port is taken by something else it falls back to an
-  OS-assigned port.
-- Native menu & tray: left-click the tray icon to show the window, right-click for the menu (open
-  the UI in your default browser, restart the server, reveal the data directory, quit).
-- Tray-resident: closing the window hides it instead of stopping the server; only "退出"
-  (quit) from the menu/tray actually exits.
-- No console flashes: every spawned child process (the `dsh` server, `npm install` on first run)
-  runs with its console window suppressed — only the app window itself is visible.
-- Crash recovery: an unexpected server exit is restarted once automatically, then surfaced on a
-  retry screen with logs.
-- Auto-update: the boot page checks for a newer release on startup and offers to install it.
-- Minimal attack surface: the harness page runs as a plain remote page in the webview and is given
-  **no** Tauri IPC access.
+**Is my data safe?**
+The web UI inside the app (the actual DeepSeek Harness part) runs in an isolated sandbox with
+no access to anything on your computer, exactly like the browser version. The only thing that
+does read and write local files is the desktop shell's own file panel — a separate, deliberately
+added feature so you can edit files without leaving the app, fully isolated from the web UI.
 
-## Prerequisites (development)
+**Can I use it offline?**
+The app itself opens fine offline, but whether the DeepSeek Harness service inside it needs a
+network connection depends entirely on how you've configured your model provider.
 
-- [Rust](https://rustup.rs/) (MSVC toolchain) — for the Tauri shell
-- [Node.js](https://nodejs.org/) >= 22 — required by `dsh` itself (the app locates it on `PATH`)
-- [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (preinstalled on
-  Windows 11 / most Windows 10)
-
-## Development
-
-```bash
-npm install          # installs @tauri-apps/cli
-npm run tauri dev    # builds the Rust shell and opens the app window
-```
-
-On first launch the app installs the `@deepseek-ai/dsh` npm package into a per-user runtime
-directory (`%LOCALAPPDATA%\dev.dsh.desktop\runtime`) and starts it. The install is cached by npm,
-so it is fast and offline after the first run.
-
-### Environment overrides
-
-| Variable | Purpose |
-|---|---|
-| `DSH_DESKTOP_NODE` | Absolute path to `node.exe` to use instead of the one on `PATH` |
-| `DSH_DESKTOP_DSH_BIN` | Absolute path to a `dsh` `lib/bin.js` (e.g. a local checkout) |
-| `DSH_DESKTOP_RUNTIME_DIR` | Where the managed `@deepseek-ai/dsh` runtime is installed (default: app cache dir); point it at an existing `node_modules` root to skip the first-run npm install |
-| `DSH_DESKTOP_DSH_VERSION` | npm version spec for the managed runtime (default `0.1.0-rc.6`) |
-| `DSH_DESKTOP_PORT` | Default bind port override (default `3080`); handy for running several instances |
-| `DSH_DESKTOP_CWD` | Working directory for the `dsh` server process (default: user home) |
-| `DSH_HOME` | Passed through to the server; harness data root (default `~/.dsh`) |
-
-## Architecture
-
-```
-┌─ Tauri app (Rust, WebView2) ─────────────────────────────┐
-│ local boot page (loading / error / retry)                │
-│   └─ navigates to → http://127.0.0.1:<port> (the UI)     │
-│ server manager (src-tauri/src/server.rs)                 │
-│   locate node → install/verify dsh runtime → probe 3080  │
-│   → spawn `node dsh web --port …` → parse stdout URL     │
-│   → navigate → watch process → taskkill tree on exit     │
-│ native menu & tray (src-tauri/src/menu.rs)               │
-└─────────────────────────┬────────────────────────────────┘
-                          │ spawn
-                 ┌────────▼────────┐
-                 │  dsh web server │  data → ~/.dsh (DSH_HOME)
-                 └─────────────────┘
-```
-
-The harness page is loaded from `http://127.0.0.1:<port>` and is intentionally **not** granted
-Tauri IPC access (`dangerousRemoteDomainIpcAccess` is never enabled), so the web UI cannot reach
-the shell — every shell action goes through the native menu/tray or the local boot page.
-
-## Roadmap
-
-- [x] Scaffold, server manager, menu/tray, crash recovery
-- [x] Persistent log file (`%LOCALAPPDATA%\dev.dsh.desktop\logs\desktop.log`) + live logs on the boot page
-- [x] Bundled runtime: `npm run bundle` ships `node.exe` (Node 24 — the harness's own
-      `engines.node` is `^22.19.0 || >=24.0.0`; Node 23 is intentionally excluded upstream as an
-      EOL/non-LTS line) + the `dsh` node_modules inside the NSIS installer, so the app runs on
-      machines without Node.js
-- [x] Tray-resident mode: closing the window hides it and leaves the server running; a one-time
-      notification explains this on first close each run. Only the menu/tray "退出" action stops
-      the server and exits
-- [x] Auto-update (`tauri-plugin-updater`): the boot page checks on startup and shows a
-      dismissible banner; `.github/workflows/release.yml` builds, signs and drafts a GitHub
-      Release on every `v*` tag push (a human still publishes it — auto-update amplifies the
-      blast radius of a bad release, so nothing goes live unattended). See
-      [Two version axes](#two-version-axes) below for how this interacts with the bundled `dsh`
-      runtime version.
-- [x] macOS / Linux packaging: `server.rs`'s Unix branches, `fetch-node.mjs`'s darwin/linux
-      download paths, and `prepare-runtime.mjs`'s runtime install are all verified on GitHub
-      Actions `macos-latest`/`ubuntu-latest` runners (see
-      [.github/workflows/ci.yml](.github/workflows/ci.yml)); `tauri build --bundles dmg`/`--bundles
-      deb` produce real installable artifacts and are wired into
-      [release.yml](.github/workflows/release.yml). What's still missing is code signing and
-      notarization — needs an Apple Developer account this project doesn't have, so these two
-      platforms' builds ship unsigned (see the note above)
-
-## Building the installer
-
-```bash
-npm install
-npm run bundle        # fetch:node → prepare:runtime → tauri build
-# or step by step:
-npm run fetch:node    # downloads node.exe → src-tauri/resources/runtime
-DSH_RUNTIME_SOURCE=<node_modules root> npm run prepare:runtime  # copy a local runtime instead of npm install
-npm run build         # → src-tauri/target/release/bundle/nsis/DeepSeek Harness_0.3.0_x64-setup.exe
-```
-
-Before cutting a release, run `npm run check:dsh-version` — upstream is in developer preview and
-publishes new RCs without notice; this checks the pinned `@deepseek-ai/dsh` default (duplicated in
-`src-tauri/src/server.rs` and `scripts/prepare-runtime.mjs`, they must agree) against npm's latest.
-The release workflow runs this same check and fails the build on a mismatch.
-
-### Two version axes
-
-This app has two independent version numbers that must not be conflated:
-
-- **Shell version** (`tauri.conf.json`'s `version`, e.g. `0.3.0`) — the desktop wrapper itself.
-  `tauri-plugin-updater` only updates this.
-- **Runtime version** (`DSH_VERSION_DEFAULT` in `server.rs` / the default in
-  `prepare-runtime.mjs`, e.g. `0.1.0-rc.6`) — the pinned `@deepseek-ai/dsh` release bundled
-  inside the installer or installed on first use.
-
-**For a bundled-runtime install (the default, `npm run bundle`)** these travel together
-automatically: the NSIS installer's payload includes `resources/runtime/`, so a shell
-auto-update reinstalls the runtime pinned at build time along with it — there's no separate
-runtime-update mechanism to build as long as `DSH_VERSION_DEFAULT` is bumped (and
-`check:dsh-version` passes) before cutting each shell release.
-
-**For the managed (non-bundled) runtime path** — used when there's no `resources/runtime/`
-(e.g. an unpackaged dev build, or `DSH_DESKTOP_RUNTIME_DIR` pointed elsewhere) — the runtime is
-installed once via `npm install` on first use ([server.rs](src-tauri/src/server.rs)'s
-`install_runtime`) and **never re-checked afterward**. A user on this path who wants a newer
-`dsh` has to clear `DSH_DESKTOP_RUNTIME_DIR` (or set `DSH_DESKTOP_DSH_VERSION` to a newer spec)
-and let it reinstall. This is a known, narrow gap — not worth a bespoke updater for a path that's
-mainly used in development.
+**Want to contribute or build it yourself?**
+Welcome — see the [development guide](docs/DEVELOPMENT.en.md).
 
 ## License
 
 [MIT](./LICENSE)
+</content>

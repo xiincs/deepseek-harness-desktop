@@ -1,162 +1,92 @@
-# Deepseek Harness Desktop (Tauri)
+<div align="center">
+
+# DeepSeek Harness Desktop
+
+**把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 装进一个真正的桌面应用**
+
+不用再守着浏览器标签页——一个图标，双击打开，关掉窗口它还在后台安静运行。
 
 中文 | [English](README.en.md)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/xiincs/deepseek-harness-desktop)](https://github.com/xiincs/deepseek-harness-desktop/releases/latest)
-[![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078D6)](#)
-[![Platform: macOS](https://img.shields.io/badge/platform-macOS-000000)](#)
-[![Platform: Linux](https://img.shields.io/badge/platform-Linux-FCC624)](#)
-[![Built with Tauri 2](https://img.shields.io/badge/built%20with-Tauri%202-24C8DB)](https://v2.tauri.app/)
+[![Downloads](https://img.shields.io/github/downloads/xiincs/deepseek-harness-desktop/total)](https://github.com/xiincs/deepseek-harness-desktop/releases)
+[![Windows](https://img.shields.io/badge/-Windows-0078D6?logo=windows&logoColor=white)](#-下载)
+[![macOS](https://img.shields.io/badge/-macOS-000000?logo=apple&logoColor=white)](#-下载)
+[![Linux](https://img.shields.io/badge/-Linux-FCC624?logo=linux&logoColor=black)](#-下载)
 
-### [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的原生桌面版——**Tauri 内核，安装包只有 Electron 版的 1/3 大小**
+**[⬇️ 立即下载](https://github.com/xiincs/deepseek-harness-desktop/releases/latest)** ·
+[功能一览](#-这个应用能做什么) ·
+[常见问题](#-常见问题)
 
-把 harness 自带的 Web 服务（`dsh web`）装进原生窗口：一键启动、托盘常驻、崩溃自动恢复、自动更新，
-`~/.dsh` 下的数据与浏览器版完全通用。因为用的是系统自带 WebView2 而不是打包一份 Chromium，
-安装包小很多；而且刻意**不**给内嵌页面开 Tauri IPC 权限——它接触不到你的文件系统。
+<!--
+  演示 GIF 占位：录一段"双击图标 → 窗口打开 → 点开右侧文件面板预览/编辑一个文件 →
+  关闭窗口后从托盘重新唤出"的完整操作，10-15 秒即可，放在这里替换下面的静态截图。
+-->
 
-| | 本项目（Tauri） | 常见 Electron 封装 |
+<img src="docs/screenshots/app-running.png" alt="DeepSeek Harness Desktop 运行截图" width="960">
+
+</div>
+
+---
+
+## ✨ 这是什么
+
+DeepSeek Harness 官方提供的是一个网页版工具——好用，但终究是浏览器里的一个标签页：不小心关错标签、
+被一堆其他标签淹没、电脑重启后要重新找回来。
+
+**DeepSeek Harness Desktop** 把它做成了一个真正的桌面应用：像微信、VS Code 一样，图标钉在任务栏或
+Dock 上，双击就开，关窗口不等于退出——它安静地待在系统托盘里，随时点一下就回来，之前的会话原封不动。
+
+## 🚀 这个应用能做什么
+
+- **双击即用**：打开应用，自动帮你把后台服务准备好，不需要敲命令行、不需要搞懂端口是什么。
+- **关窗不等于退出**：点右上角的关闭按钮只是把窗口藏起来，工作还在继续；托盘图标右键才是真的退出。
+- **数据和网页版完全通用**：所有会话、配置都存在同一个地方，网页版和桌面版随便切换，互不冲突。
+- **文件面板**：右侧一键唤出文件目录树，点开任意文件直接预览、编辑、保存，改动会用颜色标出来，
+  不用再切去别的编辑器来回对照。
+- **内置终端**：需要跑个命令的时候，不用再额外开一个终端窗口，应用里直接就有。
+- **崩溃了自己爬起来**：后台服务万一意外挂掉，应用会自动帮你重启一次；实在起不来也会告诉你原因，
+  而不是一片空白让你猜。
+- **有新版本会提醒你**：打开应用时自动检查更新，一键装上，不用跑去发布页面翻。
+- **体积小、开得快**：走的是系统自带的浏览器内核，不用像很多同类应用那样自带一个完整的 Chromium，
+  装包小很多，打开也更快。
+
+## ⬇️ 下载
+
+前往 **[Releases 页面](https://github.com/xiincs/deepseek-harness-desktop/releases/latest)**，
+根据你的系统下载对应安装包：
+
+| 系统 | 安装包 | 说明 |
 |---|---|---|
-| Windows 安装包 | **54 MB** | 158 MB |
-| 运行时内核 | 系统自带 WebView2 | 内置 Chromium |
-| 内嵌页面权限 | 无 IPC 访问（默认关闭） | 视具体实现而定 |
+| Windows | `.exe` | 已签名，支持自动更新，双击安装即可 |
+| macOS | `.dmg` | 首次打开需要在「系统设置 → 隐私与安全性」里手动允许一次（未加入 Apple 开发者计划，属正常现象） |
+| Linux | `.deb` | `dpkg -i` 或用系统自带的安装器打开即可 |
 
-macOS（`.dmg`）和 Linux（`.deb`）也在每个 Release 里提供，Windows 版经过签名并接入自动更新；
-mac/Linux 版**未签名、未公证**（没有 Apple Developer 账号）——macOS 需要在"系统设置 → 隐私与
-安全性"里手动允许打开一次，Linux 直接 `dpkg -i`/系统安装器装即可，两者暂不参与自动更新。
+> macOS / Linux 版暂不支持自动更新，有新版本时需要自己回来这个页面重新下载。
 
 <p align="center">
-  <img src="docs/screenshots/app-boot.png" alt="启动页：dsh 服务启动中">
-  &nbsp;&nbsp;
-  <img src="docs/screenshots/app-running.png" alt="桌面版内运行的 DeepSeek Harness">
+  <img src="docs/screenshots/app-boot.png" alt="启动页" width="400">
 </p>
 
-**[⬇️ 下载最新版本](https://github.com/xiincs/deepseek-harness-desktop/releases/latest)**
+## ❓ 常见问题
 
-## 特性
+**这是官方产品吗？**
+不是。DeepSeek Harness 本体由官方维护，这个桌面壳是社区做的第三方封装，专门解决"网页版不方便"这一件事。
 
-- **一键启动**：自动拉起 `dsh` Web 服务并加载界面，无需手动操作。
-- **数据共享**：会话、存储、配置都在 `~/.dsh`（`$DSH_HOME`），与浏览器版完全一致。
-- **智能端口处理**：如果 `127.0.0.1:3080` 上已经有 `dsh` 服务在跑，直接挂接上去，不会重复起一个实例；
-  如果端口被别的程序占用，自动改用系统分配的端口。
-- **原生菜单与托盘**：托盘图标左键直接打开窗口，右键弹出菜单（在默认浏览器中打开、重启服务、打开数据
-  目录、退出）。
-- **托盘常驻**：关闭窗口只是隐藏，服务继续在后台跑；只有菜单/托盘里的"退出"才会真正停止服务并退出。
-- **不再有黑框一闪而过**：每一个拉起的子进程（`dsh` 服务本身、首次运行时的 `npm install`）都抑制了
-  控制台窗口，屏幕上只看得到应用窗口本身。
-- **崩溃自动恢复**：服务意外退出会自动重启一次，仍然失败则显示带日志的重试页面。
-- **自动更新**：启动页会在打开时检查是否有新版本，并提供一键安装。
-- **攻击面最小化**：harness 页面作为纯远程页面加载，**不**授予任何 Tauri IPC 访问权限。
+**我的数据安全吗？**
+应用里的网页界面（也就是 DeepSeek Harness 本体的部分）运行在一个隔离的沙箱里，没有权限访问你电脑上
+的任何东西，和你原本用网页版时完全一样。唯一会读写本地文件的是桌面壳自带的文件面板——这是一个独立、
+刻意加上去的功能，方便你不用切出去就能改文件，跟网页那部分完全隔离。
 
-## 开发环境要求
+**能不能带着走，不用联网也能用？**
+应用本身可以离线打开，但里面加载的 DeepSeek Harness 服务该怎么工作还是怎么工作——具体取决于你配置的
+模型服务本身是否需要联网。
 
-- [Rust](https://rustup.rs/)（MSVC 工具链）——用于构建 Tauri 外壳
-- [Node.js](https://nodejs.org/) >= 22——`dsh` 本身依赖（应用会从 `PATH` 里定位它）
-- [WebView2 运行时](https://developer.microsoft.com/microsoft-edge/webview2/)（Windows 11 已预装，
-  多数 Windows 10 也已预装）
-
-## 开发
-
-```bash
-npm install          # 安装 @tauri-apps/cli
-npm run tauri dev    # 编译 Rust 外壳并打开应用窗口
-```
-
-首次启动时，应用会把 `@deepseek-ai/dsh` 这个 npm 包安装到每用户独立的运行时目录
-（`%LOCALAPPDATA%\dev.dsh.desktop\runtime`）并启动它。安装结果会被 npm 缓存，所以第二次启动会很快，
-且不需要联网。
-
-### 环境变量覆盖项
-
-| 变量 | 作用 |
-|---|---|
-| `DSH_DESKTOP_NODE` | 指定 `node.exe` 的绝对路径，代替 `PATH` 上那个 |
-| `DSH_DESKTOP_DSH_BIN` | 指定某个 `dsh` `lib/bin.js` 的绝对路径（比如本地某个 checkout） |
-| `DSH_DESKTOP_RUNTIME_DIR` | 托管的 `@deepseek-ai/dsh` 运行时安装位置（默认是应用缓存目录）；指向一个已有的 `node_modules` 根目录可以跳过首次的 npm install |
-| `DSH_DESKTOP_DSH_VERSION` | 托管运行时使用的 npm 版本号（默认 `0.1.0-rc.6`） |
-| `DSH_DESKTOP_PORT` | 默认绑定端口覆盖（默认 `3080`）；同时跑多个实例时很有用 |
-| `DSH_DESKTOP_CWD` | `dsh` 服务进程的工作目录（默认是用户主目录） |
-| `DSH_HOME` | 透传给服务端；harness 数据根目录（默认 `~/.dsh`） |
-
-## 架构
-
-```
-┌─ Tauri 应用 (Rust, WebView2) ─────────────────────────────┐
-│ 本地启动页（加载中 / 出错 / 重试）                          │
-│   └─ 就绪后跳转到 → http://127.0.0.1:<port>（真正的界面）  │
-│ 服务管理器 (src-tauri/src/server.rs)                       │
-│   定位 node → 安装/校验 dsh 运行时 → 探测 3080 端口         │
-│   → 拉起 `node dsh web --port …` → 从 stdout 解析真实 URL   │
-│   → 跳转 → 监视进程 → 退出时 taskkill 整棵进程树             │
-│ 原生菜单与托盘 (src-tauri/src/menu.rs)                      │
-└─────────────────────────┬────────────────────────────────┘
-                          │ 拉起
-                 ┌────────▼────────┐
-                 │  dsh web 服务    │  数据 → ~/.dsh (DSH_HOME)
-                 └─────────────────┘
-```
-
-harness 页面从 `http://127.0.0.1:<port>` 加载，故意**不**授予 Tauri IPC 访问权限
-（`dangerousRemoteDomainIpcAccess` 始终不开启），所以 Web 界面本身接触不到桌面外壳——所有外壳层面的
-操作都得走原生菜单/托盘，或者本地启动页。
-
-## 路线图
-
-- [x] 骨架代码、服务管理器、菜单/托盘、崩溃恢复
-- [x] 持久化日志文件（`%LOCALAPPDATA%\dev.dsh.desktop\logs\desktop.log`）+ 启动页实时日志
-- [x] 内置运行时：`npm run bundle` 会把 `node.exe`（选 Node 24——harness 自己的 `engines.node` 要求是
-      `^22.19.0 || >=24.0.0`，Node 23 被上游有意排除在外，因为它是非 LTS/已 EOL 的分支）连同 `dsh`
-      的 node_modules 一起打进 NSIS 安装包，这样没装 Node.js 的机器也能直接跑
-- [x] 托盘常驻模式：关闭窗口只是隐藏，服务继续跑；每次运行首次关闭时会有一条通知说明这一点。只有
-      菜单/托盘里的"退出"操作会真正停止服务并退出
-- [x] 自动更新（`tauri-plugin-updater`）：启动页在启动时检查更新，并展示一条可关闭的横幅提示；
-      `.github/workflows/release.yml` 在每次推送 `v*` tag 时构建、签名并创建一个 GitHub 草稿 Release
-      （仍需人工点击发布——自动更新一旦出问题影响的是所有已装用户，所以不会有任何东西未经确认就自动
-      上线）。内置 `dsh` 运行时版本与这个机制的关系见下文的"两条独立的版本轴线"
-- [x] macOS / Linux 打包：`server.rs` 里的 Unix 分支、`fetch-node.mjs` 的 darwin/linux 下载分支、
-      `prepare-runtime.mjs` 的运行时安装，都在 GitHub Actions 的 `macos-latest`/`ubuntu-latest`
-      runner 上验证过（见 [.github/workflows/ci.yml](.github/workflows/ci.yml)），`tauri build
-      --bundles dmg`/`--bundles deb` 也已产出真实安装包并接进
-      [release.yml](.github/workflows/release.yml)。仍未做的是代码签名与公证——需要 Apple
-      Developer 账号，目前没有，所以这两个平台的安装包是未签名状态（见上方说明）
-
-## 打包安装程序
-
-```bash
-npm install
-npm run bundle        # fetch:node → prepare:runtime → tauri build
-# 或者分步执行：
-npm run fetch:node    # 下载 node.exe → src-tauri/resources/runtime
-DSH_RUNTIME_SOURCE=<node_modules 根目录> npm run prepare:runtime  # 用本地运行时代替 npm install
-npm run build         # → src-tauri/target/release/bundle/nsis/DeepSeek Harness_0.3.0_x64-setup.exe
-```
-
-正式发布前先跑一下 `npm run check:dsh-version`——上游还在开发者预览阶段，会毫无预警地发布新的 RC；
-这个脚本会检查写死的 `@deepseek-ai/dsh` 默认版本号（在 `src-tauri/src/server.rs` 和
-`scripts/prepare-runtime.mjs` 里各存了一份，两边必须一致）是否落后于 npm 上的最新版本。发布 CI
-workflow 也会跑同一个检查，版本号对不上会直接让构建失败。
-
-### 两条独立的版本轴线
-
-这个应用有两个互相独立、不能混为一谈的版本号：
-
-- **外壳版本**（`tauri.conf.json` 里的 `version`，比如 `0.3.0`）——桌面外壳本身的版本。
-  `tauri-plugin-updater` 只会更新这一个。
-- **运行时版本**（`server.rs` 里的 `DSH_VERSION_DEFAULT` / `prepare-runtime.mjs` 里的默认值，比如
-  `0.1.0-rc.6`）——打进安装包或首次运行时安装的那个 `@deepseek-ai/dsh` 版本。
-
-**对于内置运行时的安装方式（默认，即 `npm run bundle` 打出来的包）**，这两者会自动同步：NSIS 安装包
-的内容里包含 `resources/runtime/`，所以外壳的自动更新会连带把构建时打进去的那个运行时版本一起重装
-——只要在每次切外壳版本发布前把 `DSH_VERSION_DEFAULT` 更新好（并且 `check:dsh-version` 检查通过），
-就不需要另外再搭一套运行时更新机制。
-
-**对于托管（非内置）运行时的路径**——也就是没有 `resources/runtime/` 的场景（比如未打包的开发版，
-或者 `DSH_DESKTOP_RUNTIME_DIR` 指向了别处）——运行时只会在首次使用时通过 `npm install` 装一次
-（见 [server.rs](src-tauri/src/server.rs) 里的 `install_runtime`），**之后不会再检查**。走这条路径
-的用户如果想用更新的 `dsh`，得自己清空 `DSH_DESKTOP_RUNTIME_DIR`（或者把 `DSH_DESKTOP_DSH_VERSION`
-设成更新的版本号）让它重装。这是一个已知但影响面很窄的缺口——这条路径主要在开发时用得到，不值得为它
-单独搭一套更新机制。
+**想参与开发或者自己编译？**
+欢迎，看 [开发指南](docs/DEVELOPMENT.md)。
 
 ## License
 
 [MIT](./LICENSE)
+</content>
