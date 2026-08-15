@@ -611,6 +611,18 @@ pub fn run() {
                 install_external_link_handlers(&handle, &win);
             }
 
+            // `decorations: false` in tauri.conf.json gives the frameless
+            // Windows/Linux look (custom in-page buttons + drag region), but
+            // macOS users expect the native title bar — real traffic lights
+            // on the left and drag-to-move for free. Restore it there; the
+            // shell page mirrors this compile-time platform split in
+            // ui/app.js (IS_MACOS) by hiding its custom window controls and
+            // dropping the toolbar drag region.
+            #[cfg(target_os = "macos")]
+            if let Some(win) = app.get_webview_window("main") {
+                win.set_decorations(true)?;
+            }
+
             // A window/app menu set via `set_menu()` becomes the global
             // top-of-screen menu bar on macOS (platform convention, doesn't
             // cost window space) but a classic in-window Win32-style menu

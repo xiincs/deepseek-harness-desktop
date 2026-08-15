@@ -35,6 +35,8 @@ const els = {
   panelCards: document.getElementById("panel-cards"),
   resizePanelCards: document.getElementById("resize-panel-cards"),
   btnToolbarFiles: document.getElementById("btn-toolbar-files"),
+  toolbar: document.getElementById("toolbar"),
+  windowControls: document.getElementById("window-controls"),
   btnWinMinimize: document.getElementById("btn-win-minimize"),
   btnWinMaximize: document.getElementById("btn-win-maximize"),
   btnWinClose: document.getElementById("btn-win-close"),
@@ -136,18 +138,39 @@ async function refresh() {
   }
 }
 
-// ── window controls (frameless window) ──────────────────────────────────
+// ── window chrome (per-platform) ────────────────────────────────────────
 //
-// decorations:false in tauri.conf.json removes the OS title bar entirely;
-// #toolbar carries data-tauri-drag-region (see index.html) so its own empty
-// space still moves the window, and these three buttons stand in for the
-// native minimize/maximize/close the OS would otherwise have drawn.
+// decorations:false in tauri.conf.json removes the OS title bar on every
+// platform. On Windows/Linux the shell keeps that frameless look: #toolbar
+// carries data-tauri-drag-region (see index.html) so its own empty space
+// moves the window, and the three custom buttons below stand in for the
+// native minimize/maximize/close. On macOS lib.rs re-enables the native
+// title bar (real traffic lights on the left, native drag), so the custom
+// replacements are hidden and the toolbar stops acting as a drag region —
+// see initWindowChrome() below.
 // lib.rs's on_window_event CloseRequested handler (hide-to-tray) is keyed
 // off the window-close request itself, not off which button drew it — so
 // appWindow.close() below re-enters that exact same Rust-side path with
 // nothing to change there.
 
 const appWindow = getCurrentWindow();
+
+// Mirrors lib.rs's compile-time `#[cfg(target_os = "macos")]` decorations
+// split. The UA is deterministic at load time, unlike querying isDecorated()
+// which could race with the Rust-side set_decorations(true) during setup.
+const IS_MACOS = navigator.userAgent.includes("Macintosh");
+
+function initWindowChrome() {
+  if (!IS_MACOS) return;
+  // Native title bar takes over window dragging and min/max/close — the
+  // custom replacements would only duplicate it (and its drag region would
+  // fight the native double-click-to-zoom on the title bar).
+  els.windowControls.classList.add("hidden");
+  els.toolbar.removeAttribute("data-tauri-drag-region");
+  // Left-align the remaining toolbar actions like a standard macOS toolbar
+  // (see styles.css body.platform-decorated).
+  document.body.classList.add("platform-decorated");
+}
 
 const ICON_MAXIMIZE =
   '<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor"/></svg>';
@@ -833,7 +856,10 @@ async function init() {
   applyCardFileHeight();
   initCardsResizeHandle();
   syncCardResizeHandleVisibility();
-  initWindowControls();
+  initWindowChrome();
+  // macOS uses the native title bar buttons; the custom ones are hidden
+  // (and would only double up with the native traffic lights).
+  if (!IS_MACOS) initWindowControls();
 
   try {
     const info = await invoke("get_info");
