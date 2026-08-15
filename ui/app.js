@@ -370,6 +370,12 @@ const LOCKED_WORKSPACE_KEY = "dsh-desktop-locked-workspace";
 // user decision.
 let lockedWorkspace = localStorage.getItem(LOCKED_WORKSPACE_KEY) || null;
 
+// Paths of directories the user collapsed. The tree is rebuilt from scratch
+// on every poll (see refreshTreeAndGitStatus's replaceChildren), so without
+// this the collapsed state would be lost and folders would re-expand within
+// PANEL_POLL_MS of being collapsed.
+const collapsedDirs = new Set();
+
 function renderTreeNode(entry, gitMap, container) {
   const row = document.createElement("div");
   row.className = "tree-row" + (entry.isDir ? " tree-dir" : " tree-file");
@@ -386,7 +392,9 @@ function renderTreeNode(entry, gitMap, container) {
   // sitting one indent level to the left of them.
   if (hasChildren) {
     row.appendChild(iconEl("chevron-right", "tree-caret"));
-    row.classList.add("tree-expanded"); // matches .tree-children's default (un-collapsed) state
+    // Default is expanded; collapsed dirs render collapsed from the start so
+    // the user's choice survives the periodic full rebuild.
+    row.classList.toggle("tree-expanded", !collapsedDirs.has(entry.path));
   } else {
     const spacer = document.createElement("span");
     spacer.className = "tree-caret-spacer";
@@ -411,10 +419,13 @@ function renderTreeNode(entry, gitMap, container) {
   if (hasChildren) {
     const childWrap = document.createElement("div");
     childWrap.className = "tree-children";
+    if (collapsedDirs.has(entry.path)) childWrap.classList.add("collapsed");
     container.appendChild(childWrap);
     row.addEventListener("click", () => {
       const collapsed = childWrap.classList.toggle("collapsed");
       row.classList.toggle("tree-expanded", !collapsed);
+      if (collapsed) collapsedDirs.add(entry.path);
+      else collapsedDirs.delete(entry.path);
     });
     for (const child of entry.children) {
       renderTreeNode(child, gitMap, childWrap);
