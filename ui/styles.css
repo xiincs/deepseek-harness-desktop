@@ -89,8 +89,9 @@ body {
    otherwise-empty data-tauri-drag-region everywhere else, replacing the OS
    title bar that decorations:false in tauri.conf.json removes. On macOS the
    native title bar is restored in lib.rs — see body.platform-decorated
-   below, which left-aligns the actions and lets app.js hide the custom
-   window controls.
+   below, which left-aligns the actions; the custom window controls start
+   hidden in the markup and are only revealed on the frameless platforms
+   (see index.html / app.js initWindowChrome).
 */
 
 #toolbar {

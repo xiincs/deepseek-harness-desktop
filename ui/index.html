@@ -58,8 +58,11 @@
         width) moves the window, replacing the OS title bar — see
         #window-controls below for its replacement minimize/maximize/close.
         On macOS lib.rs restores the native title bar, so app.js strips the
-        drag region and hides those custom controls at runtime (native
-        traffic lights + title-bar drag take over).
+        drag region and leaves those custom controls hidden (native traffic
+        lights + title-bar drag take over). #window-controls starts hidden
+        in the markup itself so it can never paint alongside the native
+        traffic lights before app.js has decided which chrome to use — it
+        is revealed only on the frameless platforms.
 
         A direct child of #app-shell (not nested inside the row below), so
         it always spans the full window width regardless of whether the
@@ -78,7 +81,7 @@
             <svg class="icon"><use href="#icon-folder"></use></svg>
           </button>
         </div>
-        <div id="window-controls">
+        <div id="window-controls" class="hidden">
           <button id="btn-win-minimize" class="window-btn" title="最小化">
             <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">
               <path d="M0 5h10" stroke="currentColor" stroke-width="1" />

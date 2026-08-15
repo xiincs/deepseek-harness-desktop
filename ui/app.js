@@ -161,15 +161,22 @@ const appWindow = getCurrentWindow();
 const IS_MACOS = navigator.userAgent.includes("Macintosh");
 
 function initWindowChrome() {
-  if (!IS_MACOS) return;
-  // Native title bar takes over window dragging and min/max/close — the
-  // custom replacements would only duplicate it (and its drag region would
-  // fight the native double-click-to-zoom on the title bar).
-  els.windowControls.classList.add("hidden");
-  els.toolbar.removeAttribute("data-tauri-drag-region");
-  // Left-align the remaining toolbar actions like a standard macOS toolbar
-  // (see styles.css body.platform-decorated).
-  document.body.classList.add("platform-decorated");
+  // #window-controls is hidden by default in index.html so it can never
+  // paint before this decision runs — on macOS the native traffic lights
+  // take over, and a cold-start frame with BOTH the native lights and the
+  // custom buttons would otherwise flash. Only the frameless Windows/Linux
+  // chrome reveals the custom controls.
+  if (IS_MACOS) {
+    // Native title bar takes over window dragging and min/max/close — the
+    // custom replacements would only duplicate it (and its drag region would
+    // fight the native double-click-to-zoom on the title bar).
+    els.toolbar.removeAttribute("data-tauri-drag-region");
+    // Left-align the remaining toolbar actions like a standard macOS toolbar
+    // (see styles.css body.platform-decorated).
+    document.body.classList.add("platform-decorated");
+  } else {
+    els.windowControls.classList.remove("hidden");
+  }
 }
 
 const ICON_MAXIMIZE =
