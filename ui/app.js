@@ -41,6 +41,8 @@ const els = {
   btnWinMaximize: document.getElementById("btn-win-maximize"),
   btnWinClose: document.getElementById("btn-win-close"),
   btnFilesCollapse: document.getElementById("btn-files-collapse"),
+  btnAppMenu: document.getElementById("btn-app-menu"),
+  appMenu: document.getElementById("app-menu"),
   cardFiles: document.getElementById("card-files"),
   cardFile: document.getElementById("card-file"),
   panelPreviewTitle: document.getElementById("panel-preview-title"),
@@ -136,6 +138,73 @@ async function refresh() {
     show("error");
     els.errorMessage.textContent = `无法获取状态: ${err}`;
   }
+}
+
+// ── app menu (hamburger, left of the drag region) ──────────────────────
+//
+// Fronts the same five actions menu.rs's tray menu already offers
+// (MENU_OPEN_BROWSER/RESTART/OPEN_DATA_DIR/TOGGLE_AUTOSTART/QUIT) — those
+// are otherwise only reachable via the tray icon on Windows/Linux, since
+// decorations:false leaves no native menu bar for them to live in (see
+// menu.rs's set_menu() macOS-only gate). trigger_menu_action forwards the
+// clicked id straight to lib.rs's handle_menu_action, the same dispatcher
+// the tray's own on_menu_event already calls — no action logic duplicated
+// here, this is only presentation. Not wired up at all on macOS (see
+// init()'s own !IS_MACOS guard below) — the native menu bar already covers
+// this, and the hamburger button itself is hidden there (styles.css
+// body.platform-decorated).
+
+function isAppMenuOpen() {
+  return !els.appMenu.classList.contains("hidden");
+}
+
+async function openAppMenu() {
+  // Re-read on every open rather than caching: the tray's own "开机自动
+  //启动" checkbox can be toggled independently of this menu (or the OS
+  // setting changed outside the app entirely), so a stale cached value
+  // could show a checkmark that no longer matches reality.
+  let enabled = false;
+  try {
+    enabled = await invoke("get_autostart_enabled");
+  } catch {
+    /* leave unchecked rather than block opening the menu over this */
+  }
+  els.appMenu.querySelector(".app-menu-check").classList.toggle("hidden", !enabled);
+  els.appMenu.classList.remove("hidden");
+  els.btnAppMenu.setAttribute("aria-expanded", "true");
+}
+
+function closeAppMenu() {
+  els.appMenu.classList.add("hidden");
+  els.btnAppMenu.setAttribute("aria-expanded", "false");
+}
+
+function initAppMenu() {
+  els.btnAppMenu.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (isAppMenuOpen()) {
+      closeAppMenu();
+    } else {
+      openAppMenu();
+    }
+  });
+
+  for (const item of els.appMenu.querySelectorAll(".app-menu-item")) {
+    item.addEventListener("click", () => {
+      const id = item.dataset.menuId;
+      closeAppMenu();
+      invoke("trigger_menu_action", { id });
+    });
+  }
+
+  // Outside click / Escape — the two standard ways a dropdown expects to
+  // be dismissed without acting on anything.
+  document.addEventListener("click", (event) => {
+    if (isAppMenuOpen() && !els.appMenu.contains(event.target)) closeAppMenu();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && isAppMenuOpen()) closeAppMenu();
+  });
 }
 
 // ── window chrome (per-platform) ────────────────────────────────────────
@@ -898,9 +967,14 @@ async function init() {
   initCardsResizeHandle();
   syncCardResizeHandleVisibility();
   initWindowChrome();
-  // macOS uses the native title bar buttons; the custom ones are hidden
-  // (and would only double up with the native traffic lights).
-  if (!IS_MACOS) initWindowControls();
+  // macOS uses the native title bar buttons and native top menu bar; the
+  // custom window controls and the in-window hamburger menu are both
+  // hidden there (see styles.css body.platform-decorated) and would only
+  // double up with chrome that already exists natively.
+  if (!IS_MACOS) {
+    initWindowControls();
+    initAppMenu();
+  }
 
   try {
     const info = await invoke("get_info");

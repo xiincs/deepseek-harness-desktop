@@ -81,34 +81,43 @@ body {
   overflow: hidden;
 }
 
-/* ── toolbar: drag region + right-aligned dock/window-control buttons ── */
+/* ── toolbar: drag region + a button cluster on each side ── */
 /*
-   No brand block anymore (the iframed harness already shows its own
-   logo/title — see the HTML comment above #toolbar), so on the frameless
-   Windows/Linux build this bar has a single cluster on the right and an
-   otherwise-empty data-tauri-drag-region everywhere else, replacing the OS
-   title bar that decorations:false in tauri.conf.json removes. On macOS the
-   native title bar is restored in lib.rs — see body.platform-decorated
-   below, which left-aligns the actions; the custom window controls start
-   hidden in the markup and are only revealed on the frameless platforms
-   (see index.html / app.js initWindowChrome).
+   No brand block (the iframed harness already shows its own logo/title —
+   see the HTML comment above #toolbar) — instead a hamburger menu sits on
+   the left (see #app-menu-wrap below) and the dock/window-control cluster
+   stays on the right, with an otherwise-empty data-tauri-drag-region
+   between them, replacing the OS title bar that decorations:false in
+   tauri.conf.json removes. On macOS the native title bar is restored in
+   lib.rs — see body.platform-decorated below, which hides the (there,
+   redundant — see #toolbar-left's own rule) hamburger and left-aligns the
+   remaining actions; the custom window controls start hidden in the markup
+   and are only revealed on the frameless platforms (see index.html / app.js
+   initWindowChrome).
+
+   Three children now (#toolbar-left, #toolbar-actions, #window-controls),
+   so justify-content:space-between would spread all three apart evenly —
+   shoving #toolbar-actions into the dead center instead of leaving it
+   flush against #window-controls. flex-start (the default main-axis
+   packing) plus margin-left:auto on #toolbar-actions gets the actual
+   intent: #toolbar-left stays put, and auto-margin consumes all the
+   leftover space in front of #toolbar-actions, pushing it and
+   #window-controls to the right edge as one adjacent pair.
 */
 
 #toolbar {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  padding: 10px 14px;
+  padding: 6px 10px;
   background: var(--sidebar-bg);
   border-bottom: 1px solid var(--card-border);
 }
 
-/* macOS restores the native title bar (see app.js's initWindowChrome), so
-   the toolbar keeps only its left action cluster and lays it out like a
-   standard macOS toolbar; the custom window controls are hidden there. */
-body.platform-decorated #toolbar {
-  justify-content: flex-start;
+#toolbar-left {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 #toolbar-actions {
@@ -116,6 +125,28 @@ body.platform-decorated #toolbar {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* macOS restores the native title bar (see app.js's initWindowChrome), so
+   the toolbar keeps only its action cluster, left-aligned like a standard
+   macOS toolbar. #toolbar-left (the hamburger) is redundant there — macOS
+   already gets a native top menu bar covering the same actions (menu.rs's
+   set_menu() macOS-only gate) — and #window-controls is hidden by
+   app.js/index.html's own platform check, leaving #toolbar-actions the only
+   visible child; its margin-left:auto (the Windows/Linux "push past
+   #toolbar-left to the far right" trick above) would otherwise still shove
+   it to the opposite edge here, with nothing left of it to separate from. */
+body.platform-decorated #toolbar {
+  justify-content: flex-start;
+}
+
+body.platform-decorated #toolbar-left {
+  display: none;
+}
+
+body.platform-decorated #toolbar-actions {
+  margin-left: 0;
 }
 
 .toolbar-btn {
@@ -159,6 +190,70 @@ body.platform-decorated #toolbar {
 .toolbar-btn.active {
   background: var(--accent-tint-bg);
   color: var(--accent-tint-text);
+}
+
+/* ── app menu: hamburger dropdown, left of the drag region ── */
+/*
+   Not a native OS menu — decorations:false (see menu.rs) leaves Windows/
+   Linux with no menu bar to hang one off, and the actions here already
+   exist as tray-menu items (menu.rs's build_tray). This is that same
+   action set, reachable without leaving the window. Styled like the dock
+   cards (surface/border/radius/shadow tokens) rather than introducing a
+   separate "menu" visual language.
+*/
+
+#app-menu-wrap {
+  position: relative;
+}
+
+.app-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  box-shadow: var(--card-shadow);
+}
+
+.app-menu.hidden {
+  display: none;
+}
+
+.app-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.app-menu-item:hover {
+  background: var(--btn-hover-bg);
+}
+
+.app-menu-check {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  color: var(--accent);
+}
+
+.app-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--card-border);
 }
 
 /* ── window controls: our own minimize/maximize/close, replacing the OS's ── */

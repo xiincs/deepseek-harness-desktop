@@ -188,6 +188,19 @@ fn open_data_dir(app: AppHandle) -> Result<(), String> {
     app.opener().reveal_item_in_dir(&home).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn get_autostart_enabled(app: AppHandle) -> bool {
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+/// Lets the in-window hamburger menu (Windows/Linux have no native menu bar —
+/// see `set_menu()`'s macOS-only gate in `run()`) fire the exact same actions
+/// as the tray menu, through the one dispatcher both already share.
+#[tauri::command]
+fn trigger_menu_action(app: AppHandle, id: String) {
+    handle_menu_action(&app, &id);
+}
+
 #[derive(serde::Serialize)]
 struct UpdateInfo {
     version: String,
@@ -577,6 +590,8 @@ pub fn run() {
             get_log_tail,
             open_in_browser,
             open_data_dir,
+            get_autostart_enabled,
+            trigger_menu_action,
             check_for_update,
             install_update,
             get_workspace_tree,

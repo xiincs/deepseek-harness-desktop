@@ -47,19 +47,32 @@
       <symbol id="icon-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="6 9 12 15 18 9"></polyline>
       </symbol>
+      <symbol id="icon-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="4" y1="7" x2="20" y2="7"></line>
+        <line x1="4" y1="12" x2="20" y2="12"></line>
+        <line x1="4" y1="17" x2="20" y2="17"></line>
+      </symbol>
+      <symbol id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </symbol>
     </svg>
 
     <div id="app-shell">
       <!--
         No brand lockup here on purpose — the iframed harness content
         already renders its own logo/title, so the shell chrome doesn't
-        repeat it. On Windows/Linux (frameless: decorations:false) this bar
-        carries data-tauri-drag-region so its own empty space (most of its
-        width) moves the window, replacing the OS title bar — see
-        #window-controls below for its replacement minimize/maximize/close.
-        On macOS lib.rs restores the native title bar, so app.js strips the
-        drag region and leaves those custom controls hidden (native traffic
-        lights + title-bar drag take over). #window-controls starts hidden
+        repeat it. The hamburger button on the left is the one exception:
+        not a brand mark, just the entry point for actions that have nowhere
+        else to live on Windows/Linux (no native menu bar — see menu.rs's
+        set_menu() macOS-only gate), otherwise reachable only via the tray
+        icon. On Windows/Linux (frameless: decorations:false) this bar
+        carries data-tauri-drag-region so its own empty space moves the
+        window, replacing the OS title bar — see #window-controls below for
+        its replacement minimize/maximize/close. On macOS lib.rs restores
+        the native title bar (real traffic lights + title-bar drag) and its
+        own native menu bar already covers the hamburger's actions, so
+        app.js hides both the hamburger and the drag region there too (see
+        styles.css body.platform-decorated). #window-controls starts hidden
         in the markup itself so it can never paint alongside the native
         traffic lights before app.js has decided which chrome to use — it
         is revealed only on the frameless platforms.
@@ -70,6 +83,25 @@
         right edge instead of just the edge of whatever's left of the dock.
       -->
       <div id="toolbar" data-tauri-drag-region>
+        <div id="toolbar-left">
+          <div id="app-menu-wrap">
+            <button id="btn-app-menu" class="toolbar-btn" title="菜单" aria-haspopup="true" aria-expanded="false">
+              <svg class="icon"><use href="#icon-menu"></use></svg>
+            </button>
+            <div id="app-menu" class="app-menu hidden" role="menu">
+              <button class="app-menu-item" data-menu-id="open_browser" role="menuitem">在浏览器中打开</button>
+              <button class="app-menu-item" data-menu-id="restart" role="menuitem">重启服务</button>
+              <button class="app-menu-item" data-menu-id="open_data_dir" role="menuitem">打开数据目录</button>
+              <div class="app-menu-sep"></div>
+              <button class="app-menu-item" data-menu-id="toggle_autostart" role="menuitemcheckbox">
+                <svg class="icon app-menu-check hidden"><use href="#icon-check"></use></svg>
+                <span>开机自动启动</span>
+              </button>
+              <div class="app-menu-sep"></div>
+              <button class="app-menu-item" data-menu-id="quit" role="menuitem">退出</button>
+            </div>
+          </div>
+        </div>
         <div id="toolbar-actions">
           <button id="btn-toolbar-terminal" class="toolbar-btn" disabled title="终端（即将推出）">
             <svg class="icon"><use href="#icon-terminal"></use></svg>
