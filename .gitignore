@@ -17,6 +17,10 @@ src-tauri/resources/runtime/
 # debugging. docs/screenshots/ stays tracked; only this subfolder is ignored.
 docs/internal/
 
+# Internal planning notes — useful locally, not meant for the public repo.
+docs/ROADMAP.md
+docs/TODO.md
+
 # OS / editor
 .DS_Store
 Thumbs.db
