@@ -36,6 +36,7 @@ const els = {
   resizePanelCards: document.getElementById("resize-panel-cards"),
   btnToolbarFiles: document.getElementById("btn-toolbar-files"),
   btnToolbarTerminal: document.getElementById("btn-toolbar-terminal"),
+  dockViewFiles: document.getElementById("dock-view-files"),
   cardTerminal: document.getElementById("card-terminal"),
   terminalContainer: document.getElementById("terminal-container"),
   btnTerminalRestart: document.getElementById("btn-terminal-restart"),
@@ -407,30 +408,38 @@ function initCardsResizeHandle() {
   });
 }
 
-// ── dock open/closed ────────────────────────────────────────────────────
+// ── dock view switching ─────────────────────────────────────────────────
 //
-// Closed on every launch (not persisted) — the toolbar's 文件/终端 buttons
-// are each a deliberate opt-in per session, not state to restore. Only the
-// width (once opened) is remembered, via panelWidth/PANEL_WIDTH_KEY above.
-//
-// #panel itself is shared by both: it stays visible as long as *either*
-// toggle is active, so closing Files while Terminal is open collapses only
-// the Files card, not the dock the Terminal card is still sitting in.
+// One dock (#panel), two mutually exclusive views — Files and Terminal
+// share the same toolbar button group for a reason: opening one is meant
+// to replace the other, not stack beside it (unlike Files vs. its own
+// File-preview card, which *are* meant to sit together — see
+// #dock-view-files). Neither is persisted across launches; each toolbar
+// button is a deliberate opt-in per session. Only the dock's width (once
+// opened) is remembered, via panelWidth/PANEL_WIDTH_KEY above.
 
-function syncPanelVisibility() {
-  const open = els.btnToolbarFiles.classList.contains("active") || els.btnToolbarTerminal.classList.contains("active");
-  els.panel.classList.toggle("hidden", !open);
-  els.resizePanelContent.classList.toggle("hidden", !open);
-}
+function setDockView(view) {
+  // view: "files" | "terminal" | null (closed)
+  const filesOpen = view === "files";
+  const terminalOpen = view === "terminal";
 
-function setDockOpen(open) {
-  els.btnToolbarFiles.classList.toggle("active", open);
-  syncPanelVisibility();
-  if (open) refreshPanel();
+  els.btnToolbarFiles.classList.toggle("active", filesOpen);
+  els.dockViewFiles.classList.toggle("hidden", !filesOpen);
+
+  els.btnToolbarTerminal.classList.toggle("active", terminalOpen);
+  els.cardTerminal.classList.toggle("hidden", !terminalOpen);
+
+  els.panel.classList.toggle("hidden", view === null);
+  els.resizePanelContent.classList.toggle("hidden", view === null);
+
+  if (filesOpen) refreshPanel();
+  if (terminalOpen) {
+    ensureTerminal().then(() => requestAnimationFrame(fitTerminal));
+  }
 }
 
 function toggleDock() {
-  setDockOpen(!els.btnToolbarFiles.classList.contains("active"));
+  setDockView(els.btnToolbarFiles.classList.contains("active") ? null : "files");
 }
 
 // ── terminal ─────────────────────────────────────────────────────────────
@@ -505,22 +514,8 @@ async function ensureTerminal() {
   }
 }
 
-async function setTerminalOpen(open) {
-  els.btnToolbarTerminal.classList.toggle("active", open);
-  els.cardTerminal.classList.toggle("hidden", !open);
-  syncPanelVisibility();
-  if (open) {
-    await ensureTerminal();
-    // Belt-and-suspenders: the geometry read inside ensureTerminal's own
-    // fitTerminal() call already forces a synchronous layout, but this
-    // re-fits once more after the browser's next paint in case some part
-    // of the just-revealed layout (the dock, this card) wasn't settled yet.
-    requestAnimationFrame(fitTerminal);
-  }
-}
-
 function toggleTerminal() {
-  setTerminalOpen(els.cardTerminal.classList.contains("hidden"));
+  setDockView(els.btnToolbarTerminal.classList.contains("active") ? null : "terminal");
 }
 
 // ── file/git panel ───────────────────────────────────────────────────────
@@ -1130,7 +1125,7 @@ async function init() {
   els.btnTerminalClose.addEventListener("click", () => {
     invoke("terminal_close").catch(() => {});
     terminalSpawned = false;
-    setTerminalOpen(false);
+    setDockView(null);
   });
   // Collapses the Files card's tree/picker body without closing the whole
   // dock — independent from #card-file's own close button, per the "each

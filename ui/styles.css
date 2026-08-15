@@ -377,10 +377,26 @@ body.platform-decorated #toolbar-actions {
   max-height: none;
 }
 
-/* Unlike Files/File (deliberately small, list/diff-sized panes meant to sit
-   side by side), a terminal reads as its own full pane whenever it's open —
-   grows to claim whatever's left in #panel-cards instead of capping itself
-   the way #card-file does. */
+/* Files + File-preview as one flex column, sized exactly like #panel-cards
+   itself (same flex/gap/min-height rules) so wrapping them here doesn't
+   change how they size relative to each other — only whether the pair as a
+   whole is showing at all. */
+#dock-view-files {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+
+#dock-view-files.hidden {
+  display: none;
+}
+
+/* Mutually exclusive with #dock-view-files (see setDockView in app.js) — a
+   terminal reads as its own full pane whenever it's open, unlike Files/File
+   which are deliberately small, list/diff-sized panes meant to sit side by
+   side with each other. */
 #card-terminal {
   flex: 1;
   min-height: 240px;

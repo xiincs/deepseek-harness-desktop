@@ -186,48 +186,59 @@
 
         <aside id="panel" class="hidden">
           <div id="panel-cards">
-            <section id="card-files" class="dock-card">
-              <div class="dock-card-header">
-                <span class="dock-card-title">文件</span>
-                <div class="dock-card-actions">
-                  <button id="btn-panel-refresh" title="刷新文件树与 Git 状态">
-                    <svg class="icon"><use href="#icon-refresh"></use></svg>
-                  </button>
-                  <button id="btn-files-collapse" title="收起">
-                    <svg class="icon"><use href="#icon-chevron-up"></use></svg>
-                  </button>
-                </div>
-              </div>
-              <div class="select-wrap">
-                <select id="panel-workspace-select" title="选择要在文件树中查看的工作区"></select>
-                <svg class="select-chevron"><use href="#icon-chevron-down"></use></svg>
-              </div>
-              <div id="panel-tree"></div>
-            </section>
-
             <!--
-              Only meaningful (and only shown — see syncCardResizeHandleVisibility
-              in app.js) while both cards are in their normal state: collapsed
-              Files already claims this space for File via CSS (see the
-              #card-files.card-collapsed ~ #card-file rule), and there's
-              nothing to split against a closed File card.
+              Groups Files + File-preview into one unit so the Terminal view
+              (a sibling below, mutually exclusive with this one — see
+              setDockView in app.js) can hide both together with a single
+              class toggle, without touching either card's own internal
+              open/closed state (btn-preview-close etc. still work exactly
+              as before, just now on a card that may itself be hidden by
+              this wrapper).
             -->
-            <div id="resize-panel-cards" class="resize-handle resize-handle-h hidden" role="separator" aria-orientation="horizontal"></div>
+            <div id="dock-view-files">
+              <section id="card-files" class="dock-card">
+                <div class="dock-card-header">
+                  <span class="dock-card-title">文件</span>
+                  <div class="dock-card-actions">
+                    <button id="btn-panel-refresh" title="刷新文件树与 Git 状态">
+                      <svg class="icon"><use href="#icon-refresh"></use></svg>
+                    </button>
+                    <button id="btn-files-collapse" title="收起">
+                      <svg class="icon"><use href="#icon-chevron-up"></use></svg>
+                    </button>
+                  </div>
+                </div>
+                <div class="select-wrap">
+                  <select id="panel-workspace-select" title="选择要在文件树中查看的工作区"></select>
+                  <svg class="select-chevron"><use href="#icon-chevron-down"></use></svg>
+                </div>
+                <div id="panel-tree"></div>
+              </section>
 
-            <section id="card-file" class="dock-card hidden">
-              <div class="dock-card-header">
-                <div id="panel-preview-title-group">
-                  <span id="panel-preview-title"></span>
-                  <span id="panel-preview-dirty-dot" class="hidden" title="有未保存的改动">●</span>
+              <!--
+                Only meaningful (and only shown — see syncCardResizeHandleVisibility
+                in app.js) while both cards are in their normal state: collapsed
+                Files already claims this space for File via CSS (see the
+                #card-files.card-collapsed ~ #card-file rule), and there's
+                nothing to split against a closed File card.
+              -->
+              <div id="resize-panel-cards" class="resize-handle resize-handle-h hidden" role="separator" aria-orientation="horizontal"></div>
+
+              <section id="card-file" class="dock-card hidden">
+                <div class="dock-card-header">
+                  <div id="panel-preview-title-group">
+                    <span id="panel-preview-title"></span>
+                    <span id="panel-preview-dirty-dot" class="hidden" title="有未保存的改动">●</span>
+                  </div>
+                  <div class="dock-card-actions">
+                    <button id="btn-preview-revert" class="hidden" title="放弃改动，还原为已保存内容">还原</button>
+                    <button id="btn-preview-save" class="hidden" title="保存改动 (Ctrl+S)">保存</button>
+                    <button id="btn-preview-close" title="关闭预览">✕</button>
+                  </div>
                 </div>
-                <div class="dock-card-actions">
-                  <button id="btn-preview-revert" class="hidden" title="放弃改动，还原为已保存内容">还原</button>
-                  <button id="btn-preview-save" class="hidden" title="保存改动 (Ctrl+S)">保存</button>
-                  <button id="btn-preview-close" title="关闭预览">✕</button>
-                </div>
-              </div>
-              <div id="panel-preview-body"></div>
-            </section>
+                <div id="panel-preview-body"></div>
+              </section>
+            </div>
 
             <section id="card-terminal" class="dock-card hidden">
               <div class="dock-card-header">
