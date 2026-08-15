@@ -17,7 +17,7 @@ use std::thread;
 use std::time::Duration;
 
 use tauri::menu::CheckMenuItem;
-use tauri::{AppHandle, Manager, State, WindowEvent, Wry};
+use tauri::{AppHandle, Manager, RunEvent, State, WindowEvent, Wry};
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt as _, Modifiers, Shortcut, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
@@ -460,6 +460,90 @@ fn inject_file_mention_bridge(win: &tauri::WebviewWindow) {
 #[cfg(not(windows))]
 fn inject_file_mention_bridge(_win: &tauri::WebviewWindow) {}
 
+/// Routes every outbound `http(s)` link — `target="_blank"`/`window.open`
+/// (`NewWindowRequested`) and plain top-level navigation
+/// (`NavigationStarting`) alike — to the system's default browser instead of
+/// the embedded WebView2. Without a `NewWindowRequested` handler, WebView2's
+/// default popup blocker (`IsDefaultPopupBlockerEnabled`, on by default)
+/// silently swallows `target="_blank"` clicks — the harness page renders its
+/// message/document links that way, so external links otherwise do nothing
+/// at all. Without a `NavigationStarting` handler, a plain (non-`_blank`)
+/// outbound link would instead navigate the WebView's top level away from
+/// the harness UI, with no in-app way back (see `disable_context_menu`'s
+/// doc comment on why "back" is removed from the context menu). Handling
+/// both here keeps that decision entirely shell-side — it never depends on
+/// or routes through the dsh web server. Same one-time-at-setup reasoning as
+/// `disable_context_menu`: `CoreWebView2` event registrations, not per-page
+/// ones, so they hold across every later `navigate()` call.
+///
+/// `127.0.0.1`/`localhost` URLs are left alone in both handlers — that's the
+/// harness's own page loading, not an outbound link.
+#[cfg(windows)]
+fn install_external_link_handlers(app: &AppHandle, win: &tauri::WebviewWindow) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller;
+    use webview2_com::{take_pwstr, NavigationStartingEventHandler, NewWindowRequestedEventHandler};
+    use windows::core::PWSTR;
+
+    fn is_external_http(uri: &str) -> bool {
+        (uri.starts_with("http://") || uri.starts_with("https://"))
+            && !uri.contains("127.0.0.1")
+            && !uri.contains("localhost")
+    }
+
+    let app_new_window = app.clone();
+    let app_navigation = app.clone();
+    let _ = win.with_webview(move |webview| {
+        let controller: ICoreWebView2Controller = webview.controller();
+        let result: windows::core::Result<()> = (|| unsafe {
+            let core = controller.CoreWebView2()?;
+
+            let mut token_new_window = Default::default();
+            core.add_NewWindowRequested(
+                &NewWindowRequestedEventHandler::create(Box::new(move |_sender, args| {
+                    let Some(args) = args else { return Ok(()) };
+                    let mut uri_ptr = PWSTR::null();
+                    args.Uri(&mut uri_ptr)?;
+                    let uri = take_pwstr(uri_ptr);
+                    if is_external_http(&uri) {
+                        let _ = app_new_window.opener().open_url(uri, None::<&str>);
+                    }
+                    // Handled either way: a bare `SetHandled(false)` still
+                    // leaves the popup blocked (WebView2's default), it just
+                    // stops this handler from being the reason — so the net
+                    // effect without this line is identical to today's
+                    // "point-blank clicks do nothing" bug this exists to fix.
+                    args.SetHandled(true)?;
+                    Ok(())
+                })),
+                &mut token_new_window,
+            )?;
+
+            let mut token_navigation = Default::default();
+            core.add_NavigationStarting(
+                &NavigationStartingEventHandler::create(Box::new(move |_sender, args| {
+                    let Some(args) = args else { return Ok(()) };
+                    let mut uri_ptr = PWSTR::null();
+                    args.Uri(&mut uri_ptr)?;
+                    let uri = take_pwstr(uri_ptr);
+                    if is_external_http(&uri) {
+                        let _ = app_navigation.opener().open_url(uri, None::<&str>);
+                        args.SetCancel(true)?;
+                    }
+                    Ok(())
+                })),
+                &mut token_navigation,
+            )?;
+
+            Ok(())
+        })();
+        if let Err(e) = result {
+            eprintln!("[dsh-desktop] failed to install external link handlers: {e}");
+        }
+    });
+}
+#[cfg(not(windows))]
+fn install_external_link_handlers(_app: &AppHandle, _win: &tauri::WebviewWindow) {}
+
 // ── menu / tray actions ──────────────────────────────────────────────────────
 
 fn handle_menu_action(app: &AppHandle, id: &str) {
@@ -493,9 +577,9 @@ fn handle_menu_action(app: &AppHandle, id: &str) {
             }
         }
         menu::MENU_QUIT => {
-            // stop() is a safe no-op in attach mode (pid stays None there),
-            // so this only tears down a server we actually spawned.
-            server::stop(&state.server);
+            // The spawned server is torn down in the ExitRequested handler
+            // at the end of run() — the single place covering every quit
+            // path (app-menu ⌘Q role, tray 退出, updater restart).
             app.exit(0);
         }
         _ => {}
@@ -600,6 +684,19 @@ pub fn run() {
                 disable_zoom_control(&win);
                 disable_devtools(&win);
                 inject_file_mention_bridge(&win);
+                install_external_link_handlers(&handle, &win);
+            }
+
+            // `decorations: false` in tauri.conf.json gives the frameless
+            // Windows/Linux look (custom in-page buttons + drag region), but
+            // macOS users expect the native title bar — real traffic lights
+            // on the left and drag-to-move for free. Restore it there; the
+            // shell page mirrors this compile-time platform split in
+            // ui/app.js (IS_MACOS) by hiding its custom window controls and
+            // dropping the toolbar drag region.
+            #[cfg(target_os = "macos")]
+            if let Some(win) = app.get_webview_window("main") {
+                win.set_decorations(true)?;
             }
 
             // A window/app menu set via `set_menu()` becomes the global
@@ -636,9 +733,9 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 // Tray-resident mode: closing the window hides it but leaves
-                // the dsh server running in the background. Only the
-                // menu/tray "退出" action (MENU_QUIT, app.exit) stops the
-                // server and actually exits the process.
+                // the dsh server running in the background. Quitting (⌘Q /
+                // tray 退出) tears the server down in the ExitRequested
+                // handler and then exits the process.
                 api.prevent_close();
                 let _ = window.hide();
 
@@ -656,8 +753,20 @@ pub fn run() {
             }
         })
         .on_menu_event(|app, event| handle_menu_action(app, event.id.as_ref()))
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Tear down the spawned dsh server before the process exits —
+            // otherwise the child is orphaned and keeps serving. Every quit
+            // path (the app-menu ⌘Q role on macOS, the tray "退出" item,
+            // updater restarts) funnels into ExitRequested before the event
+            // loop ends, so this is the one place it needs to happen.
+            if let RunEvent::ExitRequested { .. } = event {
+                if let Some(state) = app.try_state::<AppState>() {
+                    server::stop(&state.server);
+                }
+            }
+        });
 }
 
 #[cfg(test)]

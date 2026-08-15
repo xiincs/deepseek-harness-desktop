@@ -84,10 +84,14 @@ body {
 /* ── toolbar: drag region + right-aligned dock/window-control buttons ── */
 /*
    No brand block anymore (the iframed harness already shows its own
-   logo/title — see the HTML comment above #toolbar), so this bar has a
-   single cluster on the right and an otherwise-empty data-tauri-drag-region
-   everywhere else, replacing the OS title bar that decorations:false in
-   tauri.conf.json removes.
+   logo/title — see the HTML comment above #toolbar), so on the frameless
+   Windows/Linux build this bar has a single cluster on the right and an
+   otherwise-empty data-tauri-drag-region everywhere else, replacing the OS
+   title bar that decorations:false in tauri.conf.json removes. On macOS the
+   native title bar is restored in lib.rs — see body.platform-decorated
+   below, which left-aligns the actions; the custom window controls start
+   hidden in the markup and are only revealed on the frameless platforms
+   (see index.html / app.js initWindowChrome).
 */
 
 #toolbar {
@@ -98,6 +102,13 @@ body {
   padding: 10px 14px;
   background: var(--sidebar-bg);
   border-bottom: 1px solid var(--card-border);
+}
+
+/* macOS restores the native title bar (see app.js's initWindowChrome), so
+   the toolbar keeps only its left action cluster and lays it out like a
+   standard macOS toolbar; the custom window controls are hidden there. */
+body.platform-decorated #toolbar {
+  justify-content: flex-start;
 }
 
 #toolbar-actions {

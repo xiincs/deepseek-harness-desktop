@@ -35,6 +35,8 @@ const els = {
   panelCards: document.getElementById("panel-cards"),
   resizePanelCards: document.getElementById("resize-panel-cards"),
   btnToolbarFiles: document.getElementById("btn-toolbar-files"),
+  toolbar: document.getElementById("toolbar"),
+  windowControls: document.getElementById("window-controls"),
   btnWinMinimize: document.getElementById("btn-win-minimize"),
   btnWinMaximize: document.getElementById("btn-win-maximize"),
   btnWinClose: document.getElementById("btn-win-close"),
@@ -136,18 +138,46 @@ async function refresh() {
   }
 }
 
-// ── window controls (frameless window) ──────────────────────────────────
+// ── window chrome (per-platform) ────────────────────────────────────────
 //
-// decorations:false in tauri.conf.json removes the OS title bar entirely;
-// #toolbar carries data-tauri-drag-region (see index.html) so its own empty
-// space still moves the window, and these three buttons stand in for the
-// native minimize/maximize/close the OS would otherwise have drawn.
+// decorations:false in tauri.conf.json removes the OS title bar on every
+// platform. On Windows/Linux the shell keeps that frameless look: #toolbar
+// carries data-tauri-drag-region (see index.html) so its own empty space
+// moves the window, and the three custom buttons below stand in for the
+// native minimize/maximize/close. On macOS lib.rs re-enables the native
+// title bar (real traffic lights on the left, native drag), so the custom
+// replacements are hidden and the toolbar stops acting as a drag region —
+// see initWindowChrome() below.
 // lib.rs's on_window_event CloseRequested handler (hide-to-tray) is keyed
 // off the window-close request itself, not off which button drew it — so
 // appWindow.close() below re-enters that exact same Rust-side path with
 // nothing to change there.
 
 const appWindow = getCurrentWindow();
+
+// Mirrors lib.rs's compile-time `#[cfg(target_os = "macos")]` decorations
+// split. The UA is deterministic at load time, unlike querying isDecorated()
+// which could race with the Rust-side set_decorations(true) during setup.
+const IS_MACOS = navigator.userAgent.includes("Macintosh");
+
+function initWindowChrome() {
+  // #window-controls is hidden by default in index.html so it can never
+  // paint before this decision runs — on macOS the native traffic lights
+  // take over, and a cold-start frame with BOTH the native lights and the
+  // custom buttons would otherwise flash. Only the frameless Windows/Linux
+  // chrome reveals the custom controls.
+  if (IS_MACOS) {
+    // Native title bar takes over window dragging and min/max/close — the
+    // custom replacements would only duplicate it (and its drag region would
+    // fight the native double-click-to-zoom on the title bar).
+    els.toolbar.removeAttribute("data-tauri-drag-region");
+    // Left-align the remaining toolbar actions like a standard macOS toolbar
+    // (see styles.css body.platform-decorated).
+    document.body.classList.add("platform-decorated");
+  } else {
+    els.windowControls.classList.remove("hidden");
+  }
+}
 
 const ICON_MAXIMIZE =
   '<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor"/></svg>';
@@ -377,6 +407,28 @@ const LOCKED_WORKSPACE_KEY = "dsh-desktop-locked-workspace";
 // user decision.
 let lockedWorkspace = localStorage.getItem(LOCKED_WORKSPACE_KEY) || null;
 
+// Paths of directories the user collapsed. The tree is rebuilt from scratch
+// on every poll (see refreshTreeAndGitStatus's replaceChildren), so without
+// this the collapsed state would be lost and folders would re-expand within
+// PANEL_POLL_MS of being collapsed.
+//
+// TreeEntry.path is workspace-RELATIVE (see panel.rs), so these keys are
+// only meaningful for the workspace they were collapsed in — switching
+// workspaces must clear the set, or workspace B would silently inherit A's
+// collapse state for any same-relative-path directory (the same reason the
+// workspace-switch handler closes the open preview).
+const collapsedDirs = new Set();
+
+// Which workspace the last-rendered tree belonged to: lockedWorkspace when
+// pinned, else the auto-follow resolution. A change clears collapsedDirs.
+let renderedWorkspaceKey = null;
+
+function applyWorkspaceChange(workspaceKey) {
+  if (workspaceKey === null || workspaceKey === renderedWorkspaceKey) return;
+  renderedWorkspaceKey = workspaceKey;
+  collapsedDirs.clear();
+}
+
 function renderTreeNode(entry, gitMap, container) {
   const row = document.createElement("div");
   row.className = "tree-row" + (entry.isDir ? " tree-dir" : " tree-file");
@@ -393,7 +445,9 @@ function renderTreeNode(entry, gitMap, container) {
   // sitting one indent level to the left of them.
   if (hasChildren) {
     row.appendChild(iconEl("chevron-right", "tree-caret"));
-    row.classList.add("tree-expanded"); // matches .tree-children's default (un-collapsed) state
+    // Default is expanded; collapsed dirs render collapsed from the start so
+    // the user's choice survives the periodic full rebuild.
+    row.classList.toggle("tree-expanded", !collapsedDirs.has(entry.path));
   } else {
     const spacer = document.createElement("span");
     spacer.className = "tree-caret-spacer";
@@ -418,10 +472,13 @@ function renderTreeNode(entry, gitMap, container) {
   if (hasChildren) {
     const childWrap = document.createElement("div");
     childWrap.className = "tree-children";
+    if (collapsedDirs.has(entry.path)) childWrap.classList.add("collapsed");
     container.appendChild(childWrap);
     row.addEventListener("click", () => {
       const collapsed = childWrap.classList.toggle("collapsed");
       row.classList.toggle("tree-expanded", !collapsed);
+      if (collapsed) collapsedDirs.add(entry.path);
+      else collapsedDirs.delete(entry.path);
     });
     for (const child of entry.children) {
       renderTreeNode(child, gitMap, childWrap);
@@ -797,6 +854,13 @@ async function refreshTreeAndGitStatus() {
   }
   renderWorkspaceOptions(await knownWorkspacesPromise, autoLabel);
 
+  // Collapse keys are workspace-relative: a different workspace means a
+  // fresh tree, so its collapse state starts empty. Covers both the manual
+  // picker and the auto-follow re-resolution above (autoLabel is the path
+  // get_active_workspace resolved; a transient failure keeps the old state
+  // rather than wiping it).
+  applyWorkspaceChange(lockedWorkspace ?? autoLabel);
+
   try {
     const treeArgs = { overridePath: lockedWorkspace };
     const [tree, gitEntries] = await Promise.all([
@@ -960,7 +1024,10 @@ async function init() {
   applyCardFileHeight();
   initCardsResizeHandle();
   syncCardResizeHandleVisibility();
-  initWindowControls();
+  initWindowChrome();
+  // macOS uses the native title bar buttons; the custom ones are hidden
+  // (and would only double up with the native traffic lights).
+  if (!IS_MACOS) initWindowControls();
 
   try {
     const info = await invoke("get_info");
