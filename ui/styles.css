@@ -14,6 +14,8 @@
   --success-text: #2b8a3e;
   --btn-hover-bg: #eaebed;
   --btn-primary-hover-bg: #3564c9;
+  --terminal-bg: #1e1e1e;
+  --terminal-fg: #e8e8e8;
 }
 
 /* Mechanical dark-mode extension of the same tokens above — same
@@ -38,6 +40,8 @@
     --success-text: #69db7c;
     --btn-hover-bg: #35363b;
     --btn-primary-hover-bg: #5686e8;
+    /* Unset like --accent/--danger above — the terminal already reads as
+       its own dark surface regardless of app theme, nothing to flip. */
   }
 }
 
@@ -185,8 +189,8 @@ body.platform-decorated #toolbar-actions {
   background: transparent;
 }
 
-/* The one wired-up button reflects #panel's open/closed state so it reads
-   as a toggle, not a one-shot action. */
+/* Wired-up toggle buttons (Files, Terminal) get this so each reads as a
+   toggle, not a one-shot action, reflecting whether its own card is open. */
 .toolbar-btn.active {
   background: var(--accent-tint-bg);
   color: var(--accent-tint-text);
@@ -371,6 +375,30 @@ body.platform-decorated #toolbar-actions {
   flex: 1;
   min-height: 0;
   max-height: none;
+}
+
+/* Unlike Files/File (deliberately small, list/diff-sized panes meant to sit
+   side by side), a terminal reads as its own full pane whenever it's open —
+   grows to claim whatever's left in #panel-cards instead of capping itself
+   the way #card-file does. */
+#card-terminal {
+  flex: 1;
+  min-height: 240px;
+}
+
+#terminal-container {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 6px 8px;
+  background: var(--terminal-bg);
+}
+
+/* xterm.js sizes its own canvas from this element's box (see FitAddon.fit()
+   in app.js) — it must actually fill the padded container, not just sit at
+   its own intrinsic size within it. */
+#terminal-container .xterm {
+  height: 100%;
 }
 
 .dock-card-header {

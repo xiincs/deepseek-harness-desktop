@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>DeepSeek Harness</title>
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="vendor/xterm/xterm.css" />
   </head>
   <body>
     <!--
@@ -103,7 +104,7 @@
           </div>
         </div>
         <div id="toolbar-actions">
-          <button id="btn-toolbar-terminal" class="toolbar-btn" disabled title="终端（即将推出）">
+          <button id="btn-toolbar-terminal" class="toolbar-btn" title="终端">
             <svg class="icon"><use href="#icon-terminal"></use></svg>
           </button>
           <button id="btn-toolbar-diff" class="toolbar-btn" disabled title="Diff（即将推出）">
@@ -227,6 +228,19 @@
               </div>
               <div id="panel-preview-body"></div>
             </section>
+
+            <section id="card-terminal" class="dock-card hidden">
+              <div class="dock-card-header">
+                <span class="dock-card-title">终端</span>
+                <div class="dock-card-actions">
+                  <button id="btn-terminal-restart" title="重启终端">
+                    <svg class="icon"><use href="#icon-refresh"></use></svg>
+                  </button>
+                  <button id="btn-terminal-close" title="关闭终端">✕</button>
+                </div>
+              </div>
+              <div id="terminal-container"></div>
+            </section>
           </div>
           <footer id="footer"></footer>
         </aside>
@@ -250,6 +264,7 @@
       Prism's .token.* classes this replaced).
     -->
     <script src="vendor/codemirror/codemirror-bundle.min.js"></script>
+    <script src="vendor/xterm/xterm-bundle.min.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

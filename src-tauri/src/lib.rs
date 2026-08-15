@@ -9,6 +9,7 @@
 mod menu;
 mod panel;
 mod server;
+mod terminal;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -515,9 +516,10 @@ fn handle_menu_action(app: &AppHandle, id: &str) {
             }
         }
         menu::MENU_QUIT => {
-            // The spawned server is torn down in the ExitRequested handler
-            // at the end of run() — the single place covering every quit
-            // path (app-menu ⌘Q role, tray 退出, updater restart).
+            // The spawned server (and any live terminal shell) is torn down
+            // in the ExitRequested handler at the end of run() — the single
+            // place covering every quit path (app-menu ⌘Q role, tray 退出,
+            // updater restart).
             app.exit(0);
         }
         _ => {}
@@ -599,7 +601,11 @@ pub fn run() {
             get_active_workspace,
             get_known_workspaces,
             get_editable_preview,
-            save_file_content
+            save_file_content,
+            terminal::terminal_spawn,
+            terminal::terminal_write,
+            terminal::terminal_resize,
+            terminal::terminal_close
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -661,6 +667,7 @@ pub fn run() {
                 hide_notice_shown: AtomicBool::new(false),
                 autostart_item,
             });
+            app.manage(terminal::TerminalState::default());
 
             // Auto-start the harness server shortly after the window appears.
             thread::spawn(move || {
@@ -695,14 +702,18 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            // Tear down the spawned dsh server before the process exits —
-            // otherwise the child is orphaned and keeps serving. Every quit
-            // path (the app-menu ⌘Q role on macOS, the tray "退出" item,
-            // updater restarts) funnels into ExitRequested before the event
-            // loop ends, so this is the one place it needs to happen.
+            // Tear down the spawned dsh server and any live terminal shell
+            // before the process exits — otherwise they're orphaned and
+            // keep running/serving. Every quit path (the app-menu ⌘Q role
+            // on macOS, the tray "退出" item, updater restarts) funnels into
+            // ExitRequested before the event loop ends, so this is the one
+            // place it needs to happen.
             if let RunEvent::ExitRequested { .. } = event {
                 if let Some(state) = app.try_state::<AppState>() {
                     server::stop(&state.server);
+                }
+                if let Some(term_state) = app.try_state::<terminal::TerminalState>() {
+                    terminal::kill(&term_state);
                 }
             }
         });
