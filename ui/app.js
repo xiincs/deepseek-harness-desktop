@@ -309,11 +309,18 @@ function initCardsResizeHandle() {
 // deliberate opt-in each session, not a state to restore. Only the width
 // (once opened) is remembered, via panelWidth/PANEL_WIDTH_KEY above.
 
-function setDockOpen(open) {
+// `refresh: false` lets a caller that's about to drive its own, carefully
+// ordered refresh (see handleFileMention) show the dock without also
+// kicking off this function's own un-awaited refreshPanel() — two
+// concurrent, uncoordinated tree renders racing against each other, one of
+// which could win before the caller's own state (e.g. currentPreviewPath)
+// is actually set, would put the exact same stale-selection race right back
+// after fixing it in the caller.
+function setDockOpen(open, { refresh = true } = {}) {
   els.panel.classList.toggle("hidden", !open);
   els.resizePanelContent.classList.toggle("hidden", !open);
   els.btnToolbarFiles.classList.toggle("active", open);
-  if (open) refreshPanel();
+  if (open && refresh) refreshPanel();
 }
 
 function toggleDock() {
@@ -896,7 +903,7 @@ function revealSelectedTreeRow() {
 }
 
 async function handleFileMention(absPath) {
-  setDockOpen(true);
+  setDockOpen(true, { refresh: false });
 
   const knownWorkspaces = await invoke("get_known_workspaces").catch(() => []);
   const workspace = resolveWorkspaceForPath(knownWorkspaces, absPath);
@@ -904,6 +911,12 @@ async function handleFileMention(absPath) {
     // No known workspace claims this path — nothing to lock onto or
     // convert a relative path against; surface it the same way an
     // unreadable preview already does rather than silently doing nothing.
+    // Tears down whatever was previously open the same way closePreview()
+    // does — otherwise a stale editor instance (and its currentPreviewPath)
+    // would linger and get silently re-fetched/re-mounted by the next poll,
+    // clobbering this error message with unrelated old content.
+    currentPreviewPath = null;
+    destroyEditor();
     els.panelPreviewTitle.textContent = absPath;
     els.panelPreviewTitle.title = absPath;
     els.cardFile.classList.remove("hidden");
@@ -917,8 +930,14 @@ async function handleFileMention(absPath) {
   if (workspace.path !== lockedWorkspace) {
     lockWorkspace(workspace.path);
   }
-  await refreshTreeAndGitStatus();
+  // showPreview() must land first — it's the only place that sets
+  // currentPreviewPath, and renderTreeNode (inside refreshTreeAndGitStatus)
+  // marks .tree-row-selected by comparing against that same value. Doing
+  // this in the other order renders the tree against whatever was
+  // *previously* open, so revealSelectedTreeRow() below would find a stale
+  // row (or none at all) instead of the file this click just opened.
   await showPreview(relPath);
+  await refreshTreeAndGitStatus();
   revealSelectedTreeRow();
 }
 
