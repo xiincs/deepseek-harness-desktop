@@ -36,11 +36,36 @@ const els = {
   resizePanelCards: document.getElementById("resize-panel-cards"),
   btnToolbarFiles: document.getElementById("btn-toolbar-files"),
   btnToolbarTerminal: document.getElementById("btn-toolbar-terminal"),
+  btnToolbarPlugins: document.getElementById("btn-toolbar-plugins"),
   dockViewFiles: document.getElementById("dock-view-files"),
   cardTerminal: document.getElementById("card-terminal"),
   terminalContainer: document.getElementById("terminal-container"),
   btnTerminalRestart: document.getElementById("btn-terminal-restart"),
   btnTerminalClose: document.getElementById("btn-terminal-close"),
+  pluginMarketOverlay: document.getElementById("plugin-market-overlay"),
+  btnPluginMarketClose: document.getElementById("btn-plugin-market-close"),
+  pluginMarketBrowse: document.getElementById("plugin-market-browse"),
+  pluginMarketSearch: document.getElementById("plugin-market-search"),
+  pluginMarketCategory: document.getElementById("plugin-market-category"),
+  pluginMarketStatus: document.getElementById("plugin-market-status"),
+  pluginMarketGrid: document.getElementById("plugin-market-grid"),
+  pluginMarketConfirm: document.getElementById("plugin-market-confirm"),
+  btnPluginConfirmBack: document.getElementById("btn-plugin-confirm-back"),
+  pluginConfirmName: document.getElementById("plugin-confirm-name"),
+  pluginConfirmDesc: document.getElementById("plugin-confirm-desc"),
+  pluginConfirmMeta: document.getElementById("plugin-confirm-meta"),
+  pluginConfirmCmd: document.getElementById("plugin-confirm-cmd"),
+  pluginConfirmPnpmMissing: document.getElementById("plugin-confirm-pnpm-missing"),
+  btnPluginInstallPnpm: document.getElementById("btn-plugin-install-pnpm"),
+  btnPluginInstallPnpmIcon: document.getElementById("btn-plugin-install-pnpm-icon"),
+  btnPluginInstallPnpmLabel: document.getElementById("btn-plugin-install-pnpm-label"),
+  btnPluginConfirmSource: document.getElementById("btn-plugin-confirm-source"),
+  btnPluginConfirmInstall: document.getElementById("btn-plugin-confirm-install"),
+  btnPluginConfirmInstallIcon: document.getElementById("btn-plugin-confirm-install-icon"),
+  btnPluginConfirmInstallLabel: document.getElementById("btn-plugin-confirm-install-label"),
+  pluginInstallLogWrap: document.getElementById("plugin-install-log-wrap"),
+  pluginInstallLog: document.getElementById("plugin-install-log"),
+  btnPluginInstallLogClose: document.getElementById("btn-plugin-install-log-close"),
   toolbar: document.getElementById("toolbar"),
   windowControls: document.getElementById("window-controls"),
   btnWinMinimize: document.getElementById("btn-win-minimize"),
@@ -428,7 +453,9 @@ function initCardsResizeHandle() {
 // opening the terminal view already has its own, independent readiness
 // gate (ensureTerminal()) that this option doesn't touch either way.
 function setDockView(view, { refresh = true } = {}) {
-  // view: "files" | "terminal" | null (closed)
+  // view: "files" | "terminal" | null (closed) — the plugin market lives
+  // outside this dock entirely now (see #plugin-market-overlay in
+  // index.html and togglePluginMarket below), so it's not a case here.
   const filesOpen = view === "files";
   const terminalOpen = view === "terminal";
 
@@ -525,6 +552,376 @@ async function ensureTerminal() {
 
 function toggleTerminal() {
   setDockView(els.btnToolbarTerminal.classList.contains("active") ? null : "terminal");
+}
+
+// ── plugin market ────────────────────────────────────────────────────────
+//
+// The catalog is fetched live from awesome-dsh-plugin.com/plugins.json — a
+// crowd-submitted "awesome list" (GitHub-PR intake), not a registry this
+// project vets. Every entry is exactly as trustworthy as its own GitHub
+// repo, no more. Installs still go through the same `dsh plugin --profile
+// web add <package>` (server.rs's install_plugin — a thin forward to
+// `pnpm` inside the harness's own web-profile directory) as before this
+// catalog existed; only the source of *what's offered* changed, not how an
+// install actually runs. Because nothing here is pre-vetted, every install
+// is gated behind #plugin-market-confirm showing the literal command and a
+// standing risk notice — see openConfirmView / installConfirmedPlugin
+// below — there is no direct install button on a grid card.
+const PLUGIN_CATALOG_URL = "https://awesome-dsh-plugin.com/plugins.json";
+
+// Populated by loadPluginCatalog(); { categories: {id: {en,zh}}, plugins: [...] }.
+let pluginCatalog = null;
+let pluginCatalogLoadPromise = null;
+let pluginMarketSearchDebounce = null;
+// The plugin currently shown in the confirm view — installConfirmedPlugin
+// reads the command from here rather than from a DOM data-attribute, so
+// there's exactly one place ("this session's catalog fetch") a command
+// string can come from.
+let pluginConfirmTarget = null;
+
+async function loadPluginCatalog() {
+  if (pluginCatalog) return pluginCatalog;
+  if (pluginCatalogLoadPromise) return pluginCatalogLoadPromise;
+  pluginCatalogLoadPromise = (async () => {
+    const res = await fetch(PLUGIN_CATALOG_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!Array.isArray(data.plugins)) throw new Error("响应格式不正确");
+    pluginCatalog = data;
+    return data;
+  })();
+  try {
+    return await pluginCatalogLoadPromise;
+  } finally {
+    pluginCatalogLoadPromise = null;
+  }
+}
+
+function pluginCatalogLang() {
+  return document.documentElement.lang?.toLowerCase().startsWith("zh") ? "zh" : "en";
+}
+
+function populateCategoryFilter(categories) {
+  const lang = pluginCatalogLang();
+  els.pluginMarketCategory.replaceChildren();
+  const allOpt = document.createElement("option");
+  allOpt.value = "";
+  allOpt.textContent = "全部分类";
+  els.pluginMarketCategory.appendChild(allOpt);
+  for (const [id, names] of Object.entries(categories)) {
+    const opt = document.createElement("option");
+    opt.value = id;
+    opt.textContent = names[lang] || names.en || id;
+    els.pluginMarketCategory.appendChild(opt);
+  }
+}
+
+function filteredPlugins() {
+  if (!pluginCatalog) return [];
+  const query = els.pluginMarketSearch.value.trim().toLowerCase();
+  const category = els.pluginMarketCategory.value;
+  const lang = pluginCatalogLang();
+  return pluginCatalog.plugins.filter((p) => {
+    if (category && p.category !== category) return false;
+    if (!query) return true;
+    const desc = (p.description?.[lang] || p.description?.en || "").toLowerCase();
+    return p.name.toLowerCase().includes(query) || p.owner.toLowerCase().includes(query) || desc.includes(query);
+  });
+}
+
+// Caps rendered cards per render — 839 entries is fine to filter in one
+// pass, but appending 839 DOM nodes at once (or on every keystroke, given
+// the search debounce below) is the kind of thing that turns typing into
+// visible jank for no benefit: nobody scans past the first couple hundred
+// of an unsorted result set anyway.
+const PLUGIN_GRID_RENDER_CAP = 200;
+
+// GitHub-style star-count abbreviation (20011 → "20k") — the catalog's raw
+// integers read fine at card scale for anything under 1000, but a 5-digit
+// number next to a single-glyph star icon (see renderPluginGrid) crowds the
+// name/owner it shares a row with. One significant digit past the decimal,
+// trimmed of a trailing ".0", matches how GitHub itself abbreviates.
+function formatStars(n) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}m`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")}k`;
+  return String(n);
+}
+
+function renderPluginGrid() {
+  const lang = pluginCatalogLang();
+  const results = filteredPlugins();
+  els.pluginMarketStatus.textContent = `${results.length} / ${pluginCatalog.plugins.length} 个插件${
+    results.length > PLUGIN_GRID_RENDER_CAP ? `（仅显示前 ${PLUGIN_GRID_RENDER_CAP} 个，请搜索缩小范围）` : ""
+  }`;
+  if (results.length === 0) {
+    renderPluginGridPlaceholder("inbox", "没有匹配的插件。", false);
+    return;
+  }
+  els.pluginMarketGrid.replaceChildren();
+  const categoryNames = pluginCatalog.categories;
+  for (const plugin of results.slice(0, PLUGIN_GRID_RENDER_CAP)) {
+    const card = document.createElement("div");
+    card.className = "plugin-card";
+
+    const top = document.createElement("div");
+    top.className = "plugin-card-top";
+    const name = document.createElement("span");
+    name.className = "plugin-card-name";
+    name.title = `${plugin.owner}/${plugin.name}`;
+    const owner = document.createElement("span");
+    owner.className = "plugin-card-owner";
+    owner.textContent = `${plugin.owner}/`;
+    name.appendChild(owner);
+    name.appendChild(document.createTextNode(plugin.name));
+    const stars = document.createElement("span");
+    stars.className = "plugin-card-stars";
+    stars.title = `${plugin.stars ?? 0} stars`;
+    stars.appendChild(iconEl("star", "plugin-card-stars-icon"));
+    stars.appendChild(document.createTextNode(formatStars(plugin.stars ?? 0)));
+    top.appendChild(name);
+    top.appendChild(stars);
+
+    const desc = document.createElement("p");
+    desc.className = "plugin-card-desc";
+    const descText = plugin.description?.[lang] || plugin.description?.en || "";
+    desc.textContent = descText;
+    desc.title = descText;
+
+    const foot = document.createElement("div");
+    foot.className = "plugin-card-foot";
+    const catNames = categoryNames[plugin.category];
+    const cat = document.createElement("span");
+    cat.className = "plugin-card-category";
+    cat.textContent = (catNames && (catNames[lang] || catNames.en)) || plugin.category;
+    const btn = document.createElement("button");
+    btn.className = "plugin-card-install-btn";
+    btn.appendChild(iconEl("download", "icon"));
+    btn.appendChild(document.createTextNode("安装"));
+    btn.addEventListener("click", () => openConfirmView(plugin));
+    foot.appendChild(cat);
+    foot.appendChild(btn);
+
+    card.appendChild(top);
+    card.appendChild(desc);
+    card.appendChild(foot);
+    els.pluginMarketGrid.appendChild(card);
+  }
+}
+
+function onPluginMarketFilterChange() {
+  clearTimeout(pluginMarketSearchDebounce);
+  pluginMarketSearchDebounce = setTimeout(renderPluginGrid, 120);
+}
+
+// The catalog's own `install` field is a full CLI invocation string (`dsh
+// plugin --profile web add <package>`) meant for a human to copy-paste —
+// install_plugin (server.rs) instead takes just `<package>` as a single
+// arg it appends itself, so the trailing token is all that's forwarded.
+function packageFromInstallCommand(installCmd) {
+  const parts = installCmd.trim().split(/\s+/);
+  return parts[parts.length - 1];
+}
+
+function openConfirmView(plugin) {
+  pluginConfirmTarget = plugin;
+  const lang = pluginCatalogLang();
+  els.pluginConfirmName.textContent = `${plugin.owner}/${plugin.name}`;
+  els.pluginConfirmDesc.textContent = plugin.description?.[lang] || plugin.description?.en || "";
+  els.pluginConfirmMeta.textContent = `来源：${plugin.url} · ★ ${formatStars(plugin.stars ?? 0)}`;
+  els.pluginConfirmCmd.textContent = plugin.install;
+  els.pluginMarketBrowse.classList.add("hidden");
+  els.pluginMarketConfirm.classList.remove("hidden");
+  refreshPnpmGate();
+}
+
+// The install button carries an icon (see #btn-plugin-confirm-install-icon
+// in index.html) alongside its label, so its busy/idle states can't just
+// overwrite textContent — that would wipe the icon along with the old
+// text. "loader" swaps in a spinning placeholder for both the checking and
+// installing states; "download" is the one idle icon, since idle always
+// means "确认安装" regardless of which busy state preceded it.
+function setInstallButtonState(icon, label) {
+  els.btnPluginConfirmInstallIcon.querySelector("use").setAttribute("href", `#icon-${icon}`);
+  els.btnPluginConfirmInstallIcon.classList.toggle("icon-spin", icon === "loader");
+  els.btnPluginConfirmInstallLabel.textContent = label;
+}
+
+// `dsh plugin add` shells out to pnpm (see install_plugin's own doc
+// comment in server.rs) — without it, "确认安装" would just fail on a raw
+// OS "pnpm not found" error. Gates the install button on a live probe
+// (check_pnpm_available) instead, showing #plugin-confirm-pnpm-missing
+// with a one-click fix when it's absent. Re-run after installPnpm
+// finishes, not just once on open, so the button unlocks the moment pnpm
+// actually becomes available without the user having to reopen the dialog.
+async function refreshPnpmGate() {
+  els.btnPluginConfirmInstall.disabled = true;
+  setInstallButtonState("loader", "正在检测环境…");
+  els.pluginConfirmPnpmMissing.classList.add("hidden");
+  let available = false;
+  try {
+    available = await invoke("check_pnpm_available");
+  } catch {
+    // Treat a failed probe itself as "unknown" — the confirm button stays
+    // gated (safer default) and the plugin's own install attempt will
+    // surface whatever the real problem is either way.
+  }
+  // The user may have already navigated away from this exact plugin (or
+  // closed the dialog) by the time the async probe above resolves — only
+  // touch the confirm view's own controls if we're still looking at it.
+  if (els.pluginMarketConfirm.classList.contains("hidden")) return;
+  els.pluginConfirmPnpmMissing.classList.toggle("hidden", available);
+  els.btnPluginConfirmInstall.disabled = !available;
+  setInstallButtonState("download", "确认安装");
+}
+
+function closeConfirmView() {
+  pluginConfirmTarget = null;
+  els.pluginMarketConfirm.classList.add("hidden");
+  els.pluginMarketBrowse.classList.remove("hidden");
+}
+
+// Same centered icon+label shape as .plugin-market-empty (renderPluginGrid)
+// — loading and "nothing here" read as the same kind of placeholder, just
+// with a spinning loader instead of a static inbox glyph and no fixed grid
+// membership of its own to worry about clearing later (openPluginMarket
+// always replaces this via renderPluginGrid or its own catch block before
+// the user can interact with anything else).
+function renderPluginGridPlaceholder(icon, label, spin) {
+  const wrap = document.createElement("div");
+  wrap.className = "panel-empty plugin-market-empty";
+  const iconNode = iconEl(icon, "plugin-market-empty-icon");
+  if (spin) iconNode.classList.add("icon-spin");
+  wrap.appendChild(iconNode);
+  const p = document.createElement("p");
+  p.className = "muted";
+  p.textContent = label;
+  wrap.appendChild(p);
+  els.pluginMarketGrid.replaceChildren(wrap);
+}
+
+async function openPluginMarket() {
+  els.pluginMarketOverlay.classList.remove("hidden");
+  els.btnToolbarPlugins.classList.add("active");
+  closeConfirmView();
+  if (!pluginCatalog) {
+    els.pluginMarketStatus.textContent = "";
+    renderPluginGridPlaceholder("loader", "正在加载插件目录…", true);
+  }
+  try {
+    const data = await loadPluginCatalog();
+    populateCategoryFilter(data.categories);
+    renderPluginGrid();
+  } catch (err) {
+    els.pluginMarketStatus.textContent = "";
+    renderPluginGridPlaceholder("alert-circle", `插件目录加载失败: ${err}`, false);
+  }
+}
+
+function closePluginMarket() {
+  els.pluginMarketOverlay.classList.add("hidden");
+  els.btnToolbarPlugins.classList.remove("active");
+}
+
+function togglePluginMarket() {
+  if (els.pluginMarketOverlay.classList.contains("hidden")) {
+    openPluginMarket();
+  } else {
+    closePluginMarket();
+  }
+}
+
+function showPluginInstallLog() {
+  els.pluginInstallLog.textContent = "";
+  els.pluginInstallLogWrap.classList.remove("hidden");
+}
+
+function appendPluginInstallLog(text) {
+  els.pluginInstallLog.textContent += (els.pluginInstallLog.textContent ? "\n" : "") + text;
+  els.pluginInstallLog.scrollTop = els.pluginInstallLog.scrollHeight;
+}
+
+// The "plugin-install" event listener (see its listen() call below) only
+// ever hears about the one dsh child process this shell can run at a time
+// (install_plugin's own single-flight guard in server.rs) — it resets
+// whichever button this was pointed at once a Done event arrives, without
+// Done itself carrying the package name back.
+let pluginInstallButton = null;
+
+function resetPluginInstallButton() {
+  if (!pluginInstallButton) return;
+  pluginInstallButton.disabled = false;
+  setInstallButtonState("download", "确认安装");
+  pluginInstallButton = null;
+}
+
+// Fires only from the confirm view's own button — never directly off a
+// grid card — so every install has already shown its exact command next to
+// the standing third-party-code warning before this runs.
+async function installConfirmedPlugin() {
+  const plugin = pluginConfirmTarget;
+  if (!plugin) return;
+  const pkg = packageFromInstallCommand(plugin.install);
+  els.btnPluginConfirmInstall.disabled = true;
+  setInstallButtonState("loader", "安装中…");
+  pluginInstallButton = els.btnPluginConfirmInstall;
+  showPluginInstallLog();
+  appendPluginInstallLog(`$ dsh plugin --profile web add ${pkg}`);
+  try {
+    await invoke("install_plugin", { package: pkg });
+  } catch (err) {
+    appendPluginInstallLog(`启动安装失败: ${err}`);
+    resetPluginInstallButton();
+  }
+  // On success, re-enabling the button happens in the "plugin-install"
+  // event listener below, keyed on the Done event — the invoke() call
+  // above only confirms the child process *started*, not that `pnpm add`
+  // itself finished.
+}
+
+// The "pnpm-install" event listener (see its listen() call below) only
+// ever hears about the one `npm install -g pnpm` child this shell can run
+// at a time (install_pnpm's own single-flight guard in server.rs) — same
+// button-tracking shape as pluginInstallButton above, kept as its own
+// variable since installing pnpm and installing a plugin are independent
+// actions that can't collide but also shouldn't share state.
+let pnpmInstallButton = null;
+
+// Same icon+label split as setInstallButtonState above, for the smaller
+// "一键安装 pnpm" button — its icon only ever toggles between its one idle
+// state (download) and busy (spinning loader), no third state to name.
+function setPnpmButtonBusy(busy) {
+  els.btnPluginInstallPnpmIcon
+    .querySelector("use")
+    .setAttribute("href", busy ? "#icon-loader" : "#icon-download");
+  els.btnPluginInstallPnpmIcon.classList.toggle("icon-spin", busy);
+  els.btnPluginInstallPnpmLabel.textContent = busy ? "安装中…" : "一键安装 pnpm";
+}
+
+function resetPnpmInstallButton() {
+  if (!pnpmInstallButton) return;
+  pnpmInstallButton.disabled = false;
+  setPnpmButtonBusy(false);
+  pnpmInstallButton = null;
+}
+
+// Fires only from #plugin-confirm-pnpm-missing's own button. Re-probes via
+// refreshPnpmGate() once the child exits successfully, so "确认安装"
+// unlocks immediately rather than requiring the user to close and reopen
+// the dialog to notice pnpm is now there.
+async function installPnpm() {
+  els.btnPluginInstallPnpm.disabled = true;
+  setPnpmButtonBusy(true);
+  pnpmInstallButton = els.btnPluginInstallPnpm;
+  showPluginInstallLog();
+  appendPluginInstallLog("$ npm install -g pnpm");
+  try {
+    await invoke("install_pnpm");
+  } catch (err) {
+    appendPluginInstallLog(`启动安装失败: ${err}`);
+    resetPnpmInstallButton();
+  }
+  // On success, re-enabling the button and re-probing pnpm both happen in
+  // the "pnpm-install" event listener below, keyed on the Done event.
 }
 
 // ── file/git panel ───────────────────────────────────────────────────────
@@ -1221,6 +1618,28 @@ async function init() {
     terminalSpawned = false;
     xterm?.writeln("\r\n\x1b[90m[进程已结束]\x1b[0m");
   });
+  listen("plugin-install", (event) => {
+    const payload = event.payload;
+    if (payload.state === "line") {
+      appendPluginInstallLog(payload.text);
+    } else if (payload.state === "done") {
+      appendPluginInstallLog(payload.success ? "安装完成。" : `安装失败（exit ${payload.code ?? "?"}）。`);
+      resetPluginInstallButton();
+    }
+  });
+  listen("pnpm-install", (event) => {
+    const payload = event.payload;
+    if (payload.state === "line") {
+      appendPluginInstallLog(payload.text);
+    } else if (payload.state === "done") {
+      appendPluginInstallLog(payload.success ? "pnpm 安装完成。" : `pnpm 安装失败（exit ${payload.code ?? "?"}）。`);
+      resetPnpmInstallButton();
+      // Re-probe regardless of success/failure — cheap, and covers the case
+      // where npm reported non-zero but pnpm actually ended up on PATH
+      // anyway (e.g. a post-install warning unrelated to the binary itself).
+      if (!els.pluginMarketConfirm.classList.contains("hidden")) refreshPnpmGate();
+    }
+  });
   els.btnRetry.addEventListener("click", () => {
     els.btnRetry.disabled = true;
     invoke("start_server")
@@ -1246,6 +1665,27 @@ async function init() {
   els.btnOpenBrowser.addEventListener("click", () => invoke("open_in_browser"));
   els.btnToolbarFiles.addEventListener("click", toggleDock);
   els.btnToolbarTerminal.addEventListener("click", toggleTerminal);
+  els.btnToolbarPlugins.addEventListener("click", togglePluginMarket);
+  els.btnPluginMarketClose.addEventListener("click", closePluginMarket);
+  els.pluginMarketOverlay.addEventListener("click", (e) => {
+    if (e.target === els.pluginMarketOverlay) closePluginMarket();
+  });
+  els.pluginMarketSearch.addEventListener("input", onPluginMarketFilterChange);
+  els.pluginMarketCategory.addEventListener("change", renderPluginGrid);
+  els.btnPluginConfirmBack.addEventListener("click", closeConfirmView);
+  els.btnPluginConfirmSource.addEventListener("click", () => {
+    if (pluginConfirmTarget) invoke("open_external_url", { url: pluginConfirmTarget.url }).catch(() => {});
+  });
+  els.btnPluginConfirmInstall.addEventListener("click", installConfirmedPlugin);
+  els.btnPluginInstallPnpm.addEventListener("click", installPnpm);
+  els.btnPluginInstallLogClose.addEventListener("click", () => {
+    els.pluginInstallLogWrap.classList.add("hidden");
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !els.pluginMarketOverlay.classList.contains("hidden")) {
+      closePluginMarket();
+    }
+  });
   els.btnTerminalRestart.addEventListener("click", async () => {
     await invoke("terminal_close").catch(() => {});
     terminalSpawned = false;

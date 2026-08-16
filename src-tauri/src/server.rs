@@ -98,6 +98,16 @@ pub struct DshServer {
     pub logs: VecDeque<String>,
     pid: Option<u32>,
     install_pid: Option<u32>,
+    /// Set while a `dsh plugin add` child is running — see `install_plugin`.
+    /// Distinct from `install_pid` (the one-time runtime bootstrap): this
+    /// one can fire repeatedly across a session, once per plugin install.
+    plugin_install_pid: Option<u32>,
+    /// Set while an `npm install -g pnpm` child is running — see
+    /// `install_pnpm`. A separate lock from `plugin_install_pid`: installing
+    /// pnpm and installing a plugin are different resources (global npm
+    /// state vs. one dsh web-profile add) and aren't meant to block each
+    /// other, even though a plugin install will itself fail without pnpm.
+    pnpm_install_pid: Option<u32>,
     requested_stop: bool,
     last_auto_restart: Option<Instant>,
     node: Option<String>,
@@ -111,6 +121,8 @@ impl Default for DshServer {
             logs: VecDeque::new(),
             pid: None,
             install_pid: None,
+            plugin_install_pid: None,
+            pnpm_install_pid: None,
             requested_stop: false,
             last_auto_restart: None,
             node: None,
@@ -253,21 +265,31 @@ fn node_binary_name() -> &'static str {
     }
 }
 
-/// A `npm install …` command that works from a non-interactive spawn context.
-/// On Windows, `npm` is a `.cmd` shim that `Command::new("npm")` can't
-/// execute directly without going through `cmd /C`; other platforms invoke
-/// the `npm` binary directly.
-fn npm_install_command(args: &[&str]) -> Command {
+/// A `<program> …` command that works from a non-interactive spawn context,
+/// for PATH-resolved npm-ecosystem CLIs specifically (npm, pnpm, …). On
+/// Windows these install as a `.cmd`/`.ps1` shim, not a bare `.exe` —
+/// `Command::new(program)` calls `CreateProcess` directly and, unlike a
+/// human typing at a shell, never consults `PATHEXT` to try `.cmd`/`.bat`
+/// suffixes on a no-extension name, so it fails outright with "program not
+/// found" even though the same name works fine typed into any shell. Other
+/// platforms invoke the binary directly — no shim layer there.
+fn npm_ecosystem_command(program: &str, args: &[&str]) -> Command {
     if cfg!(target_os = "windows") {
         let mut cmd = Command::new("cmd");
-        cmd.arg("/C").arg("npm").args(args);
+        cmd.arg("/C").arg(program).args(args);
         hide_console(&mut cmd);
         cmd
     } else {
-        let mut cmd = Command::new("npm");
+        let mut cmd = Command::new(program);
         cmd.args(args);
         cmd
     }
+}
+
+/// A `npm install …` command — see `npm_ecosystem_command`'s own doc
+/// comment for why this can't just be `Command::new("npm")` on Windows.
+fn npm_install_command(args: &[&str]) -> Command {
+    npm_ecosystem_command("npm", args)
 }
 
 /// Make `cmd`'s child its own process-group leader (Unix only, no-op call
@@ -460,6 +482,217 @@ fn install_runtime(app: &AppHandle, server: &Shared, rd: &Path) -> Result<(), St
     Ok(())
 }
 
+// ── plugin install ───────────────────────────────────────────────────────────
+//
+// Thin wrapper around `dsh plugin --profile web add <package>` — verified
+// against the real bundled `dsh` binary's own --help output to actually
+// forward to `pnpm` inside the web profile's directory (a real pnpm
+// workspace under `$DSH_HOME/profiles/web`), not a bespoke installer this
+// project would need to maintain. `package` is never sourced from the
+// harness page (zero IPC — see lib.rs's module doc comment): it only ever
+// reaches here via this shell's own UI. The UI's catalog itself (see
+// PLUGIN_CATALOG_URL in app.js) is fetched from a crowd-submitted registry
+// this project doesn't vet — this function has no opinion on that, and
+// isn't the safety boundary for it; the confirm-before-install step in the
+// plugin market dialog is.
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum PluginInstallEvent {
+    Line { text: String },
+    Done { success: bool, code: Option<i32> },
+}
+
+/// Runs `dsh plugin --profile web add <package>`, streaming stdout/stderr
+/// lines to the `plugin-install` event as they arrive (installs can take a
+/// while — pnpm resolving/downloading a package tree — so the UI needs
+/// progress, not just a final result). Emits one `Done` event when the
+/// child exits, success or not.
+///
+/// Single-flight: rejects a call while an earlier install is still running,
+/// rather than letting two concurrent `pnpm add` children interleave their
+/// output into the same `plugin-install` stream with no way for a listener
+/// to tell which line belongs to which. The frontend's own per-button
+/// disabled state is a UX nicety on top of this, not a substitute for it —
+/// this guard is what actually makes it safe.
+pub fn install_plugin(app: &AppHandle, server: &Shared, package: &str) -> Result<(), String> {
+    {
+        let mut s = server.lock().unwrap();
+        if s.plugin_install_pid.is_some() {
+            return Err("已有插件正在安装，请等待完成后再试。".to_string());
+        }
+        // Reserved with a placeholder before resolve_node/resolve_bin (which
+        // can themselves install the runtime and take a while) so a second
+        // call arriving during that window is still rejected, not raced.
+        s.plugin_install_pid = Some(0);
+    }
+
+    let node = match resolve_node(app) {
+        Ok(v) => v,
+        Err(e) => {
+            server.lock().unwrap().plugin_install_pid = None;
+            return Err(e);
+        }
+    };
+    let bin = match resolve_bin(app, server) {
+        Ok(v) => v,
+        Err(e) => {
+            server.lock().unwrap().plugin_install_pid = None;
+            return Err(e);
+        }
+    };
+
+    let mut cmd = Command::new(&node);
+    cmd.arg(&bin).arg("plugin").arg("--profile").arg("web").arg("add").arg(package);
+    // Same PATH rebuild as the server process itself — pnpm needs a real
+    // PATH to find node/git, not whatever this GUI process happened to
+    // inherit at launch. See `effective_path`'s own doc comment.
+    cmd.env("PATH", effective_path());
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    own_process_group(&mut cmd);
+    hide_console(&mut cmd);
+
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            server.lock().unwrap().plugin_install_pid = None;
+            return Err(format!("无法运行 dsh plugin add: {e}"));
+        }
+    };
+
+    server.lock().unwrap().plugin_install_pid = Some(child.id());
+
+    let stdout = child.stdout.take().expect("stdout pipe");
+    let stderr = child.stderr.take().expect("stderr pipe");
+    let app1 = app.clone();
+    thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            let _ = app1.emit("plugin-install", PluginInstallEvent::Line { text: line });
+        }
+    });
+    let app2 = app.clone();
+    thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            let _ = app2.emit("plugin-install", PluginInstallEvent::Line { text: line });
+        }
+    });
+
+    let app3 = app.clone();
+    let srv = server.clone();
+    thread::spawn(move || {
+        let status = child.wait();
+        let (success, code) = match status {
+            Ok(st) => (st.success(), st.code()),
+            Err(_) => (false, None),
+        };
+        srv.lock().unwrap().plugin_install_pid = None;
+        let _ = app3.emit("plugin-install", PluginInstallEvent::Done { success, code });
+    });
+
+    Ok(())
+}
+
+// ── pnpm detection & one-click install ──────────────────────────────────────
+//
+// `dsh plugin add` (install_plugin above) shells out to `pnpm` inside the
+// web profile directory — if pnpm isn't on PATH, that fails with a raw OS
+// "not found" error the plugin market's confirm view has no way to explain.
+// check_pnpm_available lets the frontend probe for that *before* offering
+// "确认安装", and install_pnpm (`npm install -g pnpm`) is the fix it can
+// offer inline instead of sending the user to a terminal.
+
+/// Same probe style as `resolve_node`'s system-node check: shell out with
+/// `--version` and see if it succeeds. Goes through `npm_ecosystem_command`
+/// (not a bare `Command::new("pnpm")`) since pnpm installs as a `.cmd` shim
+/// on Windows too — the same gap that made `install_pnpm`'s own first cut
+/// fail outright with "program not found" would otherwise make this probe
+/// permanently report "unavailable" even right after a successful install.
+/// Uses `effective_path()` — the same rebuilt PATH `install_plugin` itself
+/// runs pnpm under — so this reports what a real install attempt would
+/// actually see, not just whatever PATH this GUI process happened to
+/// inherit at launch.
+pub fn check_pnpm_available() -> bool {
+    let mut probe = npm_ecosystem_command("pnpm", &["--version"]);
+    probe.env("PATH", effective_path());
+    probe.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    matches!(probe.status(), Ok(status) if status.success())
+}
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum PnpmInstallEvent {
+    Line { text: String },
+    Done { success: bool, code: Option<i32> },
+}
+
+/// Runs `npm install -g pnpm`, streaming output to the `pnpm-install` event —
+/// same shape as `install_plugin`'s own streaming/single-flight design, on
+/// its own lock (`pnpm_install_pid`) since this installs into the user's
+/// global npm state, a different resource than a single dsh plugin add.
+/// Needs a real system `npm`, not the bundled runtime (that runtime only
+/// ships `node` + the vendored `dsh` package tree, no global npm install
+/// target of its own) — resolve_node's PATH fallback covers this the same
+/// way it covers "no bundled runtime at all" for node itself. Goes through
+/// `npm_ecosystem_command`, not `Command::new("npm")` directly — npm is a
+/// `.cmd` shim on Windows (see that function's own doc comment), so the
+/// bare form spawned fine on other platforms but failed outright here with
+/// a raw "program not found" the confirm view had no way to explain.
+pub fn install_pnpm(app: &AppHandle, server: &Shared) -> Result<(), String> {
+    {
+        let mut s = server.lock().unwrap();
+        if s.pnpm_install_pid.is_some() {
+            return Err("pnpm 正在安装，请等待完成后再试。".to_string());
+        }
+        s.pnpm_install_pid = Some(0);
+    }
+
+    let mut cmd = npm_ecosystem_command("npm", &["install", "-g", "pnpm"]);
+    cmd.env("PATH", effective_path());
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    own_process_group(&mut cmd);
+
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            server.lock().unwrap().pnpm_install_pid = None;
+            return Err(format!(
+                "无法运行 npm install -g pnpm: {e}（请确认系统已安装 Node.js/npm）"
+            ));
+        }
+    };
+
+    server.lock().unwrap().pnpm_install_pid = Some(child.id());
+
+    let stdout = child.stdout.take().expect("stdout pipe");
+    let stderr = child.stderr.take().expect("stderr pipe");
+    let app1 = app.clone();
+    thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            let _ = app1.emit("pnpm-install", PnpmInstallEvent::Line { text: line });
+        }
+    });
+    let app2 = app.clone();
+    thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            let _ = app2.emit("pnpm-install", PnpmInstallEvent::Line { text: line });
+        }
+    });
+
+    let app3 = app.clone();
+    let srv = server.clone();
+    thread::spawn(move || {
+        let status = child.wait();
+        let (success, code) = match status {
+            Ok(st) => (st.success(), st.code()),
+            Err(_) => (false, None),
+        };
+        srv.lock().unwrap().pnpm_install_pid = None;
+        let _ = app3.emit("pnpm-install", PnpmInstallEvent::Done { success, code });
+    });
+
+    Ok(())
+}
+
 // ── self-heal: stale profiles/node_modules symlinks ─────────────────────────
 
 /// Extracts the offending path from a dsh bootstrap error line matching
@@ -536,6 +769,54 @@ fn heal_stale_symlink(app: &AppHandle, server: &Shared, path: &Path) -> bool {
 /// from at logon) instead of trusting whatever this process happened to
 /// start with. Falls back to the process's own `PATH` if the registry read
 /// fails for any reason — never worse than doing nothing.
+/// Registry `PATH` values are commonly `REG_EXPAND_SZ` — a template string
+/// with literal `%VAR%` placeholders (this machine's own machine-level
+/// PATH includes `%NVM_SYMLINK%`, `%JAVA_HOME%\bin`, `%SystemRoot%`, …) —
+/// but `winreg`'s own `get_value::<String, _>` decodes `REG_EXPAND_SZ`
+/// exactly like plain `REG_SZ`: no expansion, the `%...%` comes through
+/// verbatim (see winreg's types.rs, where both variants hit the same
+/// string-decode branch). A tool installed under an expanded path (pnpm
+/// under nvm4w's `%NVM_SYMLINK%\nodejs`, say) then never resolves: the
+/// PATH entry Windows itself would expand at logon stays a literal,
+/// unmatchable string in every child process this app spawns. Win32's own
+/// `ExpandEnvironmentStringsW` is the standard way to do what Windows does
+/// automatically for interactively-launched processes; there's no
+/// winreg-level equivalent to reach for instead. Two-call convention: pass
+/// `None` first to get the required buffer length, then a real buffer —
+/// safe here because `dst` never has an interior NUL for the API to choke
+/// on (Rust `String`s already reject one) and `HSTRING::from` produces the
+/// NUL-terminated UTF-16 the first call's *including-NUL* length assumes.
+#[cfg(windows)]
+fn expand_env_string(raw: &str) -> String {
+    use windows::core::HSTRING;
+    use windows::Win32::System::Environment::ExpandEnvironmentStringsW;
+
+    let src = HSTRING::from(raw);
+    // SAFETY: `lpdst: None` just asks for the required length — no buffer
+    // is written, so there's nothing for the FFI call to write out of
+    // bounds of.
+    let needed = unsafe { ExpandEnvironmentStringsW(&src, None) };
+    if needed == 0 {
+        // Expansion failed (e.g. an unresolvable %VAR%) — the raw,
+        // unexpanded string is still a usable PATH segment on its own
+        // (Windows itself falls back to leaving unmatched %VAR% literal
+        // rather than erroring), so degrade to that instead of dropping it.
+        return raw.to_string();
+    }
+    let mut buf = vec![0u16; needed as usize];
+    // SAFETY: `buf` is sized to exactly the length the first call reported
+    // as required (including the NUL terminator), so the second call's
+    // write stays within `buf`'s bounds.
+    let written = unsafe { ExpandEnvironmentStringsW(&src, Some(&mut buf)) };
+    if written == 0 || written as usize > buf.len() {
+        return raw.to_string();
+    }
+    // `written` counts the NUL terminator; trim it before decoding so the
+    // result doesn't carry an embedded U+0000 into the PATH string this
+    // feeds into.
+    String::from_utf16_lossy(&buf[..written as usize - 1])
+}
+
 #[cfg(windows)]
 fn effective_path() -> String {
     use winreg::enums::HKEY_CURRENT_USER;
@@ -545,10 +826,12 @@ fn effective_path() -> String {
     let machine = RegKey::predef(HKEY_LOCAL_MACHINE)
         .open_subkey(r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")
         .and_then(|k| k.get_value::<String, _>("Path"))
+        .map(|p| expand_env_string(&p))
         .unwrap_or_default();
     let user = RegKey::predef(HKEY_CURRENT_USER)
         .open_subkey("Environment")
         .and_then(|k| k.get_value::<String, _>("Path"))
+        .map(|p| expand_env_string(&p))
         .unwrap_or_default();
     // Matches Windows' own logon-time order: machine entries first, then
     // user entries. Also keep whatever this process already had (e.g. a

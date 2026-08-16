@@ -56,6 +56,56 @@
       <symbol id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="20 6 9 17 4 12"></polyline>
       </symbol>
+      <symbol id="icon-package" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+        <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+        <line x1="12" y1="22.08" x2="12" y2="12"></line>
+      </symbol>
+      <symbol id="icon-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </symbol>
+      <symbol id="icon-star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+      </symbol>
+      <symbol id="icon-external-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+        <polyline points="15 3 21 3 21 9"></polyline>
+        <line x1="10" y1="14" x2="21" y2="3"></line>
+      </symbol>
+      <symbol id="icon-alert-triangle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+        <line x1="12" y1="9" x2="12" y2="13"></line>
+        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+      </symbol>
+      <symbol id="icon-alert-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="8" x2="12" y2="12"></line>
+        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+      </symbol>
+      <symbol id="icon-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="18" y1="6" x2="6" y2="18"></line>
+        <line x1="6" y1="6" x2="18" y2="18"></line>
+      </symbol>
+      <symbol id="icon-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+        <polyline points="7 10 12 15 17 10"></polyline>
+        <line x1="12" y1="15" x2="12" y2="3"></line>
+      </symbol>
+      <symbol id="icon-loader" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="2" x2="12" y2="6"></line>
+        <line x1="12" y1="18" x2="12" y2="22"></line>
+        <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line>
+        <line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line>
+        <line x1="2" y1="12" x2="6" y2="12"></line>
+        <line x1="18" y1="12" x2="22" y2="12"></line>
+        <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line>
+        <line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line>
+      </symbol>
+      <symbol id="icon-inbox" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>
+        <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path>
+      </symbol>
     </svg>
 
     <div id="app-shell">
@@ -102,6 +152,9 @@
               <button class="app-menu-item" data-menu-id="quit" role="menuitem">退出</button>
             </div>
           </div>
+          <button id="btn-toolbar-plugins" class="toolbar-btn" title="插件市场">
+            <svg class="icon"><use href="#icon-package"></use></svg>
+          </button>
         </div>
         <div id="toolbar-actions">
           <button id="btn-toolbar-terminal" class="toolbar-btn" title="终端">
@@ -264,9 +317,129 @@
               </div>
               <div id="terminal-container"></div>
             </section>
+
           </div>
           <footer id="footer"></footer>
         </aside>
+      </div>
+    </div>
+
+    <!--
+      Plugin market: a full-window dialog, not a dock card — see the
+      "plugin market" comment above PLUGIN_CATALOG_URL in app.js for why
+      (839 crowd-submitted entries fetched live from
+      awesome-dsh-plugin.com/plugins.json need real browse/search room, not
+      a sidebar strip). A direct child of <body>, sibling to #app-shell, so
+      it overlays the whole window regardless of whether the file/terminal
+      dock is open. Installing still goes through the same `dsh plugin
+      --profile web add <package>` / install_plugin as before — only the
+      catalog source and the browsing surface changed, not the install
+      mechanism — and every install is gated behind
+      #plugin-market-confirm's own explicit "show the exact command, then
+      ask" step (see openConfirmView / installConfirmedPlugin in app.js):
+      nothing here fires install_plugin from a single click.
+    -->
+    <div id="plugin-market-overlay" class="hidden">
+      <div id="plugin-market-dialog" role="dialog" aria-modal="true" aria-labelledby="plugin-market-title">
+        <div class="dock-card-header">
+          <span id="plugin-market-title" class="dock-card-title dock-card-title-icon">
+            <svg class="icon"><use href="#icon-package"></use></svg>
+            插件市场
+          </span>
+          <div class="dock-card-actions">
+            <button id="btn-plugin-market-close" title="关闭">
+              <svg class="icon"><use href="#icon-x"></use></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- browse view: search + category filter + result grid -->
+        <div id="plugin-market-browse">
+          <div id="plugin-market-toolbar">
+            <div id="plugin-market-search-wrap" class="input-icon-wrap">
+              <svg class="input-icon"><use href="#icon-search"></use></svg>
+              <input id="plugin-market-search" type="search" placeholder="搜索插件名称或描述…" autocomplete="off" />
+            </div>
+            <div class="select-wrap select-wrap-inline">
+              <select id="plugin-market-category"></select>
+              <svg class="select-chevron"><use href="#icon-chevron-down"></use></svg>
+            </div>
+          </div>
+          <p id="plugin-market-status" class="muted"></p>
+          <div id="plugin-market-grid"></div>
+        </div>
+
+        <!--
+          Confirm view: swapped in for the grid, not a second popup on top of
+          it — one focus target at a time. Shows the literal command
+          install_plugin will run (see openConfirmView in app.js) before
+          the user can actually trigger it, since every entry here is
+          unvetted third-party code the awesome-dsh-plugin.com site's own
+          install UI carries the same warning about.
+        -->
+        <div id="plugin-market-confirm" class="hidden">
+          <button id="btn-plugin-confirm-back" class="link-back">
+            <svg class="icon"><use href="#icon-chevron-right"></use></svg>
+            返回列表
+          </button>
+          <h3 id="plugin-confirm-name"></h3>
+          <p id="plugin-confirm-desc" class="muted"></p>
+          <p id="plugin-confirm-meta" class="muted"></p>
+          <div class="plugin-confirm-warning">
+            <svg class="plugin-confirm-warning-icon"><use href="#icon-alert-triangle"></use></svg>
+            <span>
+              <strong>安装第三方插件存在风险。</strong>
+              插件会以当前用户权限运行第三方代码，可读取本机文件、使用你的登录凭据、访问网络，安装/审批环节不会对其进行沙箱隔离。来源仓库的构建脚本也会在安装时执行。仅安装你信任的来源。
+            </span>
+          </div>
+          <div id="plugin-confirm-cmd-wrap">
+            <span class="dock-card-title">将执行的命令</span>
+            <code id="plugin-confirm-cmd"></code>
+          </div>
+          <!--
+            Shown only when checkPnpmAvailable() (app.js) comes back false —
+            `dsh plugin add` shells out to pnpm (see install_plugin's own
+            doc comment in server.rs), so without it "确认安装" would just
+            fail on a raw OS "not found" error. Disables the install button
+            until pnpm is actually detected, rather than letting the user
+            hit that error after already confirming.
+          -->
+          <div id="plugin-confirm-pnpm-missing" class="plugin-confirm-warning plugin-confirm-warning-pnpm hidden">
+            <svg class="plugin-confirm-warning-icon"><use href="#icon-alert-circle"></use></svg>
+            <span>
+              <strong>未检测到 pnpm。</strong>
+              插件安装依赖 pnpm，请先安装后再继续。
+              <div class="actions plugin-confirm-pnpm-actions">
+                <button id="btn-plugin-install-pnpm">
+                  <svg id="btn-plugin-install-pnpm-icon" class="icon"><use href="#icon-download"></use></svg>
+                  <span id="btn-plugin-install-pnpm-label">一键安装 pnpm</span>
+                </button>
+              </div>
+            </span>
+          </div>
+          <div class="actions plugin-confirm-actions">
+            <button id="btn-plugin-confirm-source" title="在浏览器中查看来源仓库">
+              <svg class="icon"><use href="#icon-external-link"></use></svg>
+              查看来源
+            </button>
+            <button id="btn-plugin-confirm-install" class="primary">
+              <svg id="btn-plugin-confirm-install-icon" class="icon"><use href="#icon-download"></use></svg>
+              <span id="btn-plugin-confirm-install-label">确认安装</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="plugin-install-log-wrap" class="hidden">
+          <div class="dock-card-header">
+            <span class="dock-card-title">安装日志</span>
+            <div class="dock-card-actions">
+              <button id="btn-plugin-install-log-close" title="关闭">
+                <svg class="icon"><use href="#icon-x"></use></svg>
+              </button>
+            </div>
+          </div>
+          <pre id="plugin-install-log" class="log"></pre>
+        </div>
       </div>
     </div>
     <!--

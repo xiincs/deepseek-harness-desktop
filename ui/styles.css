@@ -410,6 +410,393 @@ body.platform-decorated #toolbar-actions {
   background: var(--terminal-bg);
 }
 
+/* ── plugin market: full-window dialog ──────────────────────────────────
+   See the comment above #plugin-market-overlay in index.html for why this
+   is a dialog (839 fetched entries) rather than the dock-card strip the
+   file/terminal views use just above. Sizing follows the same .dock-card
+   language (surface/border/radius/shadow tokens) so it reads as part of
+   the same shell, just at dialog scale instead of sidebar scale. */
+#plugin-market-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5vh 24px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+#plugin-market-overlay.hidden {
+  display: none;
+}
+
+#plugin-market-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(920px, 100%);
+  height: 100%;
+  max-height: 780px;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+  overflow: hidden;
+}
+
+.dock-card-title-icon {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dock-card-title-icon .icon {
+  width: 14px;
+  height: 14px;
+}
+
+#plugin-market-browse {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 14px 16px;
+  gap: 10px;
+}
+
+#plugin-market-toolbar {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Wraps #plugin-market-search so the search icon can sit inside the input's
+   own rounded pill (absolute-positioned, padding-left on the input makes
+   room) instead of floating outside it — same technique as .select-wrap's
+   chevron below, just left-aligned instead of right. */
+.input-icon-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.input-icon {
+  position: absolute;
+  left: 11px;
+  width: 13px;
+  height: 13px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+#plugin-market-search {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 12px 8px 32px;
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  background: var(--sidebar-bg);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+#plugin-market-category {
+  width: auto;
+  margin: 0;
+  padding: 8px 28px 8px 12px;
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  background: var(--sidebar-bg);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+#plugin-market-status {
+  flex-shrink: 0;
+  margin: 0;
+  font-size: 12px;
+}
+
+#plugin-market-grid {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+  align-content: start;
+}
+
+/* Shared by the confirm-install and pnpm-install buttons' busy state (see
+   setInstallButtonState / setPnpmButtonBusy in app.js) — swapped onto the
+   #icon-loader use exclusively while a check or an install is in flight,
+   so the icon itself doubles as the busy indicator instead of needing a
+   separate spinner element layered on top of it. */
+.icon-spin {
+  animation: plugin-icon-spin 0.8s linear infinite;
+}
+
+@keyframes plugin-icon-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-spin {
+    animation: none;
+  }
+}
+
+.plugin-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  min-width: 0;
+}
+
+.plugin-card-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.plugin-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-card-owner {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.plugin-card-stars {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.plugin-card-stars-icon {
+  width: 11px;
+  height: 11px;
+  /* Filled, not outline like the rest of the sprite (stroke=currentColor,
+     fill=none elsewhere) — a star specifically reads as "count of a rated
+     thing" filled, the same reason GitHub's own star icon is filled next to
+     otherwise-outline UI chrome. Kept as the one deliberate exception
+     rather than matching the sprite's usual style for its own sake. */
+  fill: currentColor;
+  stroke: none;
+}
+
+.plugin-card-desc {
+  flex: 1;
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.plugin-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.plugin-card-category {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-tint-bg);
+  color: var(--accent-tint-text);
+}
+
+/* Neutral button (no .primary) on purpose — an accent-filled CTA on every
+   one of a couple hundred visible cards read as too heavy/loud across the
+   whole grid at once, unlike a lone .primary button in a single-item
+   confirm view. The download icon (not .plugin-card-category's plain-chip
+   look) is what still marks this as the card's one actionable button.
+   display/align-items/gap come from the shared button:has(.icon) rule
+   above — only the sizing that's specific to this card-scale button lives
+   here. */
+.plugin-card-install-btn {
+  flex-shrink: 0;
+  padding: 5px 14px 5px 10px;
+  font-size: 12px;
+}
+
+.plugin-card-install-btn .icon {
+  width: 12px;
+  height: 12px;
+}
+
+/* ── plugin market: confirm-before-install view ──────────────────────── */
+
+#plugin-market-confirm {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 14px 20px 20px;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+#plugin-market-confirm.hidden {
+  display: none;
+}
+
+/* display/align-items/gap come from button:has(.icon) below — a bare
+   class selector can't out-specificity a tag+:has() one regardless of
+   source order, so this doesn't restate them. align-self is this button's
+   own real addition (keeps it from stretching full-width like a normal
+   flex child would by default). */
+.link-back {
+  align-self: flex-start;
+  padding: 4px 0;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12.5px;
+}
+
+.link-back:hover {
+  background: transparent;
+  text-decoration: underline;
+}
+
+.link-back .icon {
+  width: 13px;
+  height: 13px;
+  /* Sprite has no dedicated "chevron-left" — mirroring chevron-right is a
+     smaller addition than a whole new symbol just for a shape that's
+     already perfectly symmetric under a flip. */
+  transform: scaleX(-1);
+}
+
+#plugin-confirm-name {
+  margin: 4px 0 0;
+  font-size: 16px;
+}
+
+#plugin-confirm-desc,
+#plugin-confirm-meta {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.plugin-confirm-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--danger);
+  border-radius: 10px;
+  background: var(--accent-tint-bg);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.plugin-confirm-warning-icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  color: var(--danger);
+}
+
+/* Environment gap (missing pnpm), not a third-party-code risk — kept
+   visually distinct from the plain .plugin-confirm-warning border color
+   above (var(--danger) reads as "review before you proceed", this is just
+   "one more step first") so the two don't compete for the same alarm. The
+   icon follows the same border-color swap (muted instead of --danger), for
+   the same reason. */
+.plugin-confirm-warning-pnpm {
+  border-color: var(--card-border);
+}
+
+.plugin-confirm-warning-pnpm .plugin-confirm-warning-icon {
+  color: var(--muted);
+}
+
+.plugin-confirm-pnpm-actions {
+  margin-top: 8px;
+  justify-content: flex-start;
+}
+
+#plugin-confirm-cmd-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#plugin-confirm-cmd {
+  padding: 10px 12px;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  background: var(--sidebar-bg);
+  font-family: "SF Mono", "JetBrains Mono", "Fira Code", Consolas, Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
+  user-select: text;
+}
+
+.plugin-confirm-actions {
+  margin-top: 4px;
+  justify-content: flex-start;
+}
+
+/* Shown only while an install is in flight or just finished (see
+   showPluginInstallLog in app.js) — a second, independent scroll region
+   below whichever of browse/confirm is currently showing. */
+#plugin-install-log-wrap {
+  flex: 0 0 auto;
+  max-height: 30%;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--card-border);
+  min-height: 0;
+}
+
+#plugin-install-log {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  /* Overrides .log's fixed max-height/margin — here it fills whatever
+     space #plugin-install-log-wrap's own max-height leaves it, not a
+     standalone fixed-size block like the boot-page logs. */
+  margin: 0;
+  max-height: none;
+  border-radius: 0;
+  border: none;
+}
+
 /* xterm.js sizes its own canvas from this element's box (see FitAddon.fit()
    in app.js) — it must actually fill the padded container, not just sit at
    its own intrinsic size within it. */
@@ -506,6 +893,19 @@ body.platform-decorated #toolbar-actions {
   pointer-events: none;
 }
 
+/* This dialog's own category picker reuses .select-wrap (defined just
+   above, next to #panel-workspace-select) for the same hide-native-arrow +
+   sprite-chevron technique, but sits inline in a toolbar instead of a
+   block-level sidebar row — select-wrap-inline overrides just the parts
+   that assumed the latter (full-width, block margin). Declared after
+   .select-wrap itself, not before, so this override actually wins at equal
+   selector specificity — CSS cascade order, not just source tidiness. */
+.select-wrap-inline {
+  flex-shrink: 0;
+  margin: 0;
+  width: auto;
+}
+
 #panel-tree {
   flex: 1;
   overflow-y: auto;
@@ -593,6 +993,36 @@ body.resizing-rows #panel-preview-body {
 .panel-empty {
   padding: 8px;
   font-size: 12px;
+}
+
+/* Overrides plain .panel-empty's small-text-block layout above — the
+   plugin market's own empty/loading states get a centered icon + label
+   instead, since they fill the same grid area 200 cards would otherwise
+   occupy and read as broken with just a line of text floating in that much
+   space. Declared after .panel-empty itself (not before, like the earlier
+   fix for .select-wrap-inline vs .select-wrap) so this override actually
+   wins at equal selector specificity. grid-column: 1 / -1 makes it span
+   every grid track regardless of how many .plugin-card columns the
+   current dialog width fits. */
+.plugin-market-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 16px;
+}
+
+.plugin-market-empty-icon {
+  width: 32px;
+  height: 32px;
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.plugin-market-empty p {
+  margin: 0;
 }
 
 #panel-preview-title-group {
@@ -1064,6 +1494,22 @@ button.primary:hover {
 button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Any button carrying a sprite icon (the plugin market's own buttons —
+   confirm/install/pnpm/close — are the first to do this) gets icon+label
+   laid out as a row instead of the default inline flow, which would let
+   the HTML source's own whitespace/newlines between <svg> and text produce
+   an odd gap or baseline mismatch. Scoped with :has() to just this case
+   rather than changing the shared `button` rule above, which every
+   icon-less button elsewhere in the shell also relies on — WebView2 here
+   is Chromium-based (no legacy-browser constraint for a native app), so
+   :has() is safe to lean on rather than hand-tagging every icon button
+   with its own layout class. */
+button:has(.icon) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* log */

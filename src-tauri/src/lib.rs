@@ -175,10 +175,57 @@ fn get_log_tail(state: State<'_, AppState>, n: Option<usize>) -> Vec<String> {
     server::log_tail(&state.server, n.unwrap_or(100))
 }
 
+/// `package`: an npm package name or `github:owner/repo#path` source,
+/// taken from a plugin entry in the catalog app.js fetches from
+/// awesome-dsh-plugin.com (a crowd-submitted, unvetted list — see
+/// PLUGIN_CATALOG_URL's doc comment there) after the user has confirmed
+/// that exact entry in the plugin market dialog's confirm view. Never
+/// anything sourced from the harness page itself, which stays outside this
+/// shell's IPC boundary (see the module doc comment above) — only from
+/// this shell's own UI, post-confirmation. Runs async: progress/completion
+/// arrive via the `plugin-install` event, not this call's return value,
+/// since the underlying `pnpm add` can take a while.
+#[tauri::command]
+fn install_plugin(app: AppHandle, state: State<'_, AppState>, package: String) -> Result<(), String> {
+    server::install_plugin(&app, &state.server, &package)
+}
+
+/// Probed by the plugin market's confirm view before it enables "确认安装"
+/// (see checkPnpmBeforeInstall in app.js) — `dsh plugin add` fails on a raw
+/// "pnpm not found" OS error otherwise, which the confirm view has no way
+/// to turn into a helpful message on its own.
+#[tauri::command]
+fn check_pnpm_available() -> bool {
+    server::check_pnpm_available()
+}
+
+/// Runs `npm install -g pnpm` (see server::install_pnpm) — the fix the
+/// confirm view offers inline when check_pnpm_available comes back false,
+/// instead of just telling the user to go run it in a terminal themselves.
+#[tauri::command]
+fn install_pnpm(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    server::install_pnpm(&app, &state.server)
+}
+
 #[tauri::command]
 fn open_in_browser(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let url = server::running_url(&state.server)
         .unwrap_or_else(|| format!("http://127.0.0.1:{}", server::default_port()));
+    app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+}
+
+/// Opens a plugin's source repo (the "查看来源" button in the plugin market
+/// dialog — see app.js's openConfirmView) in the system browser. Restricted
+/// to https://github.com/ specifically, not a general-purpose URL opener:
+/// `url` comes from the fetched awesome-dsh-plugin.com catalog, which this
+/// project doesn't vet (see PLUGIN_CATALOG_URL's doc comment in app.js), so
+/// this only ever hands the OS a link to the one place the whole feature is
+/// already about — a plugin's own GitHub repo — never an arbitrary target.
+#[tauri::command]
+fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
+    if !url.starts_with("https://github.com/") {
+        return Err("仅支持打开 GitHub 仓库链接。".to_string());
+    }
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
@@ -665,7 +712,11 @@ pub fn run() {
             restart_server,
             stop_server,
             get_log_tail,
+            install_plugin,
+            check_pnpm_available,
+            install_pnpm,
             open_in_browser,
+            open_external_url,
             open_data_dir,
             get_autostart_enabled,
             trigger_menu_action,

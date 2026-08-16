@@ -47,7 +47,11 @@ base64 = "0.22"
 # Raw WebView2 settings access (disabling the default context menu) —
 # see `disable_context_menu` in lib.rs.
 webview2-com = "0.38"
-windows = { version = "0.61", features = ["Win32_Foundation"] }
+# Win32_System_Environment: ExpandEnvironmentStringsW, used by
+# effective_path in server.rs to resolve %VAR% placeholders (e.g.
+# %NVM_SYMLINK%) that show up literally in registry PATH values — winreg's
+# own get_value reads REG_EXPAND_SZ as a plain string and never expands it.
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Environment"] }
 # Reads the registry's real user+machine PATH — see `effective_path` in
 # server.rs.
 winreg = "0.52"
