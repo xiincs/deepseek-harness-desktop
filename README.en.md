@@ -52,6 +52,9 @@ quietly in your system tray, one click away, exactly where you left it.
   freely between the browser version and the desktop app with nothing to sync or lose.
 - **File panel**: pop open a file tree on the side, click any file to preview, edit, and save it
   right there, changes highlighted inline — no more tabbing out to a separate editor.
+- **Plugin market**: browse, search, and install community plugins from a growing, community-run
+  catalog with hundreds of entries. Every install shows you the exact command it's about to run
+  first; nothing installs silently on a single click.
 - **Built-in terminal**: need to run a command? It's already in the app, no extra terminal
   window needed.
 - **Recovers from crashes on its own**: if the background service dies unexpectedly, the app
