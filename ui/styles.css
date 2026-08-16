@@ -518,6 +518,34 @@ body.platform-decorated #toolbar-actions {
   -webkit-appearance: none;
 }
 
+/* Same pill sizing as #plugin-market-category right above it, so the two
+   sit at matching height/radius in the toolbar row — layout itself
+   (inline-flex/align-items/gap) comes from the shared button:has(.icon)
+   rule (styles.css, near the bottom), not restated here. */
+.plugin-market-sort-btn {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  background: var(--sidebar-bg);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.plugin-market-sort-btn .icon {
+  width: 13px;
+  height: 13px;
+}
+
+/* Star icon here mirrors .plugin-card-stars-icon's own choice (filled, not
+   outline) — see that rule's comment for why; kept visually identical so
+   this toolbar control and the star count on every card below it read as
+   the same concept. */
+.plugin-market-sort-btn svg:first-of-type {
+  fill: currentColor;
+  stroke: none;
+}
+
 #plugin-market-status {
   flex-shrink: 0;
   margin: 0;

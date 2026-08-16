@@ -106,6 +106,14 @@
         <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>
         <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path>
       </symbol>
+      <symbol id="icon-arrow-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <polyline points="19 12 12 19 5 12"></polyline>
+      </symbol>
+      <symbol id="icon-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="19" x2="12" y2="5"></line>
+        <polyline points="5 12 12 5 19 12"></polyline>
+      </symbol>
     </svg>
 
     <div id="app-shell">
@@ -364,6 +372,17 @@
               <select id="plugin-market-category"></select>
               <svg class="select-chevron"><use href="#icon-chevron-down"></use></svg>
             </div>
+            <!--
+              Toggles between the two states filteredPlugins() sorts to (see
+              PLUGIN_SORT_DIRECTIONS in app.js) — desc is also the catalog's
+              own natural order (awesome-dsh-plugin.com lists highest-star
+              first already), so there's no third "unsorted" state to cycle
+              through, just these two.
+            -->
+            <button id="btn-plugin-market-sort" class="plugin-market-sort-btn" title="按 star 数排序">
+              <svg class="icon"><use href="#icon-star"></use></svg>
+              <svg id="plugin-market-sort-icon" class="icon"><use href="#icon-arrow-down"></use></svg>
+            </button>
           </div>
           <p id="plugin-market-status" class="muted"></p>
           <div id="plugin-market-grid"></div>

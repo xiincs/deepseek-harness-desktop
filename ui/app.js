@@ -47,6 +47,8 @@ const els = {
   pluginMarketBrowse: document.getElementById("plugin-market-browse"),
   pluginMarketSearch: document.getElementById("plugin-market-search"),
   pluginMarketCategory: document.getElementById("plugin-market-category"),
+  btnPluginMarketSort: document.getElementById("btn-plugin-market-sort"),
+  pluginMarketSortIcon: document.getElementById("plugin-market-sort-icon"),
   pluginMarketStatus: document.getElementById("plugin-market-status"),
   pluginMarketGrid: document.getElementById("plugin-market-grid"),
   pluginMarketConfirm: document.getElementById("plugin-market-confirm"),
@@ -579,6 +581,14 @@ let pluginMarketSearchDebounce = null;
 // string can come from.
 let pluginConfirmTarget = null;
 
+// "desc" doubles as "no explicit sort" — the catalog's own fetched order
+// is already highest-star-first (awesome-dsh-plugin.com lists it that
+// way), so toggling to "desc" and leaving it untouched read identically.
+// Only two states to cycle between (see btnPluginMarketSort's click
+// handler) rather than a third "unsorted" one that would just duplicate
+// "desc" under a different name.
+let pluginSortDirection = "desc";
+
 async function loadPluginCatalog() {
   if (pluginCatalog) return pluginCatalog;
   if (pluginCatalogLoadPromise) return pluginCatalogLoadPromise;
@@ -616,24 +626,45 @@ function populateCategoryFilter(categories) {
   }
 }
 
+// Sorts before renderPluginGrid's own PLUGIN_GRID_RENDER_CAP slice runs,
+// not after — sorting a result set and then truncating it is the only
+// order that makes "ascending" mean anything; truncating first and
+// sorting what's left would show the lowest-star entries *of an arbitrary
+// first-200 slice*, not the catalog's actual lowest-star entries.
 function filteredPlugins() {
   if (!pluginCatalog) return [];
   const query = els.pluginMarketSearch.value.trim().toLowerCase();
   const category = els.pluginMarketCategory.value;
   const lang = pluginCatalogLang();
-  return pluginCatalog.plugins.filter((p) => {
+  const results = pluginCatalog.plugins.filter((p) => {
     if (category && p.category !== category) return false;
     if (!query) return true;
     const desc = (p.description?.[lang] || p.description?.en || "").toLowerCase();
     return p.name.toLowerCase().includes(query) || p.owner.toLowerCase().includes(query) || desc.includes(query);
   });
+  // .filter() above already returns a fresh array, so sorting in place
+  // here doesn't mutate pluginCatalog.plugins itself.
+  results.sort((a, b) => {
+    const diff = (a.stars ?? 0) - (b.stars ?? 0);
+    return pluginSortDirection === "asc" ? diff : -diff;
+  });
+  return results;
 }
 
-// Caps rendered cards per render — 839 entries is fine to filter in one
-// pass, but appending 839 DOM nodes at once (or on every keystroke, given
-// the search debounce below) is the kind of thing that turns typing into
-// visible jank for no benefit: nobody scans past the first couple hundred
-// of an unsorted result set anyway.
+function togglePluginSort() {
+  pluginSortDirection = pluginSortDirection === "desc" ? "asc" : "desc";
+  const icon = pluginSortDirection === "asc" ? "arrow-up" : "arrow-down";
+  els.pluginMarketSortIcon.querySelector("use").setAttribute("href", `#icon-${icon}`);
+  els.btnPluginMarketSort.title = pluginSortDirection === "asc" ? "按 star 数从低到高排序" : "按 star 数从高到低排序";
+  renderPluginGrid();
+}
+
+// Caps rendered cards per render — 839 entries is fine to filter+sort in
+// one pass, but appending 839 DOM nodes at once (or on every keystroke,
+// given the search debounce below) is the kind of thing that turns typing
+// into visible jank for no benefit: nobody scans past the first couple
+// hundred of a result set anyway, sorted or not — this slices whatever
+// filteredPlugins() already sorted, never the other way around.
 const PLUGIN_GRID_RENDER_CAP = 200;
 
 // GitHub-style star-count abbreviation (20011 → "20k") — the catalog's raw
@@ -1672,6 +1703,7 @@ async function init() {
   });
   els.pluginMarketSearch.addEventListener("input", onPluginMarketFilterChange);
   els.pluginMarketCategory.addEventListener("change", renderPluginGrid);
+  els.btnPluginMarketSort.addEventListener("click", togglePluginSort);
   els.btnPluginConfirmBack.addEventListener("click", closeConfirmView);
   els.btnPluginConfirmSource.addEventListener("click", () => {
     if (pluginConfirmTarget) invoke("open_external_url", { url: pluginConfirmTarget.url }).catch(() => {});
