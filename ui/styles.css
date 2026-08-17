@@ -85,26 +85,30 @@ body {
   overflow: hidden;
 }
 
-/* ── toolbar: drag region + a button cluster on each side ── */
+/* ── toolbar: drag region + a centered title + a button cluster on each side ── */
 /*
-   No brand block (the iframed harness already shows its own logo/title —
-   see the HTML comment above #toolbar) — instead a hamburger menu sits on
-   the left (see #app-menu-wrap below) and the dock/window-control cluster
-   stays on the right, with an otherwise-empty data-tauri-drag-region
-   between them, replacing the OS title bar that decorations:false in
-   tauri.conf.json removes. On macOS the native title bar is restored in
+   The middle of the bar holds #toolbar-title — the one piece of brand text
+   in the shell chrome (the iframed harness already shows its own logo/title
+   — see the HTML comment above #toolbar), kept to a short muted tagline so
+   it never competes with that. A hamburger menu sits on the left (see
+   #app-menu-wrap below) and the dock/window-control cluster stays on the
+   right; everything else is data-tauri-drag-region, replacing the OS title
+   bar that decorations:false in tauri.conf.json removes. On macOS the
+   native title bar is restored in
    lib.rs — see body.platform-decorated below, which hides the (there,
    redundant — see #toolbar-left's own rule) hamburger and left-aligns the
    remaining actions; the custom window controls start hidden in the markup
    and are only revealed on the frameless platforms (see index.html / app.js
    initWindowChrome).
 
-   Three children now (#toolbar-left, #toolbar-actions, #window-controls),
-   so justify-content:space-between would spread all three apart evenly —
-   shoving #toolbar-actions into the dead center instead of leaving it
-   flush against #window-controls. flex-start (the default main-axis
-   packing) plus margin-left:auto on #toolbar-actions gets the actual
-   intent: #toolbar-left stays put, and auto-margin consumes all the
+   Four children now (#toolbar-left, #toolbar-title, #toolbar-actions,
+   #window-controls), but #toolbar-title is absolutely positioned — out of
+   the flex flow — so the layout below still works on the same three-element
+   row as before: justify-content:space-between would spread those three
+   apart evenly, shoving #toolbar-actions into the dead center instead of
+   leaving it flush against #window-controls. flex-start (the default
+   main-axis packing) plus margin-left:auto on #toolbar-actions gets the
+   actual intent: #toolbar-left stays put, and auto-margin consumes all the
    leftover space in front of #toolbar-actions, pushing it and
    #window-controls to the right edge as one adjacent pair.
 */
@@ -116,6 +120,43 @@ body {
   padding: 6px 10px;
   background: var(--sidebar-bg);
   border-bottom: 1px solid var(--card-border);
+  /* Anchors #toolbar-title's absolute centering below. */
+  position: relative;
+}
+
+/* The centered title text. Absolutely positioned (left:50% + translateX)
+   rather than a flex child, so it centers on the *window*, not on whatever
+   space happens to be left between the two button clusters — the left and
+   right clusters are different widths, so a flexed middle child would sit
+   noticeably off-center. pointer-events:none is load-bearing: Tauri's drag
+   region only engages when the mousedown target itself carries
+   data-tauri-drag-region (drag.js in the tauri crate), so a hit-testable
+   title would make the middle of the title bar undraggable — passing the
+   click straight through to #toolbar beneath keeps the whole bar draggable,
+   and is equally inert on macOS, where app.js strips the toolbar's drag
+   attribute (the native title bar handles dragging there).
+
+   Deliberately understated: no ornament, no accent — a light-weight (300,
+   matching the PingFang SC / Microsoft YaHei Light faces the font stack
+   resolves to) 14px line, dimmed below even the muted toolbar icons
+   (opacity on top of --muted) and set with a comfortable letter-spacing so
+   it reads as an airy tagline rather than a label, receding into the bar
+   instead of competing with the icon buttons flanking it. */
+#toolbar-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  /* A long title can never push under either button cluster. */
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  font-size: 14px;
+  font-weight: 300;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  opacity: 0.6;
 }
 
 #toolbar-left {

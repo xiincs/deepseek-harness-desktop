@@ -118,16 +118,24 @@
 
     <div id="app-shell">
       <!--
-        No brand lockup here on purpose — the iframed harness content
-        already renders its own logo/title, so the shell chrome doesn't
-        repeat it. The hamburger button on the left is the one exception:
-        not a brand mark, just the entry point for actions that have nowhere
-        else to live on Windows/Linux (no native menu bar — see menu.rs's
-        set_menu() macOS-only gate), otherwise reachable only via the tray
-        icon. On Windows/Linux (frameless: decorations:false) this bar
-        carries data-tauri-drag-region so its own empty space moves the
-        window, replacing the OS title bar — see #window-controls below for
-        its replacement minimize/maximize/close. On macOS lib.rs restores
+        The one piece of brand text in the shell chrome is #toolbar-title, a
+        short tagline (探索未至之境) centered in the middle of the bar — a
+        deliberately quiet, understated line (see its rule in styles.css),
+        not a logo lockup, since the iframed harness content
+        already renders its own logo/title. It carries
+        pointer-events:none so the whole bar stays a working drag region:
+        Tauri's drag handler only reacts when the mousedown target itself
+        has data-tauri-drag-region (see drag.js in the tauri crate), so a
+        hit-testable child would otherwise leave a dead spot right in the
+        middle of the title bar. The hamburger button on the left is the
+        other exception: not a brand mark, just the entry point for actions
+        that have nowhere else to live on Windows/Linux (no native menu bar
+        — see menu.rs's set_menu() macOS-only gate), otherwise reachable
+        only via the tray icon. On Windows/Linux (frameless:
+        decorations:false) this bar carries data-tauri-drag-region so its
+        own empty space moves the window, replacing the OS title bar — see
+        #window-controls below for its replacement minimize/maximize/close.
+        On macOS lib.rs restores
         the native title bar (real traffic lights + title-bar drag) and its
         own native menu bar already covers the hamburger's actions, so
         app.js hides both the hamburger and the drag region there too (see
@@ -164,6 +172,7 @@
             <svg class="icon"><use href="#icon-package"></use></svg>
           </button>
         </div>
+        <div id="toolbar-title">探索未至之境</div>
         <div id="toolbar-actions">
           <button id="btn-toolbar-terminal" class="toolbar-btn" title="终端">
             <svg class="icon"><use href="#icon-terminal"></use></svg>
