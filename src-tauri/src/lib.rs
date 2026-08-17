@@ -425,6 +425,57 @@ fn disable_context_menu(win: &tauri::WebviewWindow) {
 #[cfg(not(windows))]
 fn disable_context_menu(_win: &tauri::WebviewWindow) {}
 
+#[cfg(windows)]
+/// Embedded WebView2 controls (no visible browser chrome to show a
+/// permission prompt) default every permission-gated Web API — clipboard
+/// included — to Deny unless the host explicitly grants it here. The
+/// iframed harness page's own message Copy button calls the standard
+/// `navigator.clipboard.writeText()`; under that default it rejects, and
+/// the page's own caller swallows the rejection silently (`if (!ok)
+/// return;`), which just looks like the button does nothing (see GitHub
+/// issue #18). This is the fix on the host side, not a workaround on the
+/// page — the page has no way to know it's running inside a host that
+/// never grants what a normal browser tab would. Grants only
+/// CLIPBOARD_READ (the WebView2 SDK's single permission kind gating the
+/// whole clipboard API surface, both read and write, despite the name) —
+/// every other kind (camera, mic, geolocation, notifications, ...) is left
+/// unhandled, which resolves to WebView2's own default Deny. Same
+/// one-time-at-setup reasoning as `disable_context_menu`: a
+/// `CoreWebView2`-level event registration, not a per-page one.
+fn allow_clipboard_permission(win: &tauri::WebviewWindow) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2Controller, COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ,
+        COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+    };
+    let _ = win.with_webview(|webview| {
+        let controller: ICoreWebView2Controller = webview.controller();
+        let result: windows::core::Result<()> = (|| unsafe {
+            let core = controller.CoreWebView2()?;
+            let mut token = Default::default();
+            core.add_PermissionRequested(
+                &webview2_com::PermissionRequestedEventHandler::create(Box::new(
+                    move |_sender, args| {
+                        let Some(args) = args else { return Ok(()) };
+                        let mut kind = Default::default();
+                        args.PermissionKind(&mut kind)?;
+                        if kind == COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ {
+                            args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW)?;
+                        }
+                        Ok(())
+                    },
+                )),
+                &mut token,
+            )?;
+            Ok(())
+        })();
+        if let Err(e) = result {
+            eprintln!("[dsh-desktop] failed to grant WebView2 clipboard permission: {e}");
+        }
+    });
+}
+#[cfg(not(windows))]
+fn allow_clipboard_permission(_win: &tauri::WebviewWindow) {}
+
 /// Disables Ctrl+scroll / Ctrl+±/0 page zoom entirely. Nothing in this app's
 /// own UI (boot page or tray) exposes a zoom control — it's purely the
 /// WebView2 accelerator-key default, which had no upper bound and no way
@@ -800,6 +851,7 @@ pub fn run() {
                 disable_context_menu(&win);
                 disable_zoom_control(&win);
                 disable_devtools(&win);
+                allow_clipboard_permission(&win);
                 inject_file_mention_bridge(&win);
                 install_external_link_handlers(&handle, &win);
             }
