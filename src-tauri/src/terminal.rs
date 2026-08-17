@@ -22,12 +22,37 @@ struct TerminalSession {
 #[derive(Default)]
 pub struct TerminalState(Mutex<Option<TerminalSession>>);
 
-/// `cmd.exe` via `%COMSPEC%` — present on every Windows install without
-/// depending on PowerShell being on `PATH`; a user who wants pwsh can just
-/// type it once the shell is up.
+/// The shell the dock terminal runs.
+///
+/// Windows: `cmd.exe` via `%COMSPEC%` — present on every Windows install
+/// without depending on PowerShell being on `PATH`; a user who wants pwsh
+/// can just type it once the shell is up.
+///
+/// macOS/Linux: the user's login shell (`$SHELL`), run with `-l` so the
+/// profile chain executes (`path_helper` on macOS pulls Homebrew etc. into
+/// `PATH` — the GUI app itself inherits the minimal Finder PATH). Spawning
+/// `cmd.exe` here is what produced "Unable to spawn cmd.exe…" on macOS.
+#[cfg(target_os = "windows")]
 fn shell_command() -> CommandBuilder {
     let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into());
     CommandBuilder::new(shell)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn shell_command() -> CommandBuilder {
+    let shell = std::env::var("SHELL")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| {
+            if cfg!(target_os = "macos") {
+                "/bin/zsh".into()
+            } else {
+                "/bin/bash".into()
+            }
+        });
+    let mut cmd = CommandBuilder::new(shell);
+    cmd.arg("-l");
+    cmd
 }
 
 /// Reads PTY output on a background thread for as long as the session

@@ -856,7 +856,10 @@ fn effective_path() -> String {
 // ── probing & spawning ───────────────────────────────────────────────────────
 
 /// Cheap dependency-free HTTP probe: does `http://host:port/` serve the
-/// harness index page?
+/// harness index page? A closed port fails as fast as the OS reports the
+/// refusal; the timeouts only matter when something is listening but slow
+/// to answer — the exact case where a single impatient probe misfires (see
+/// `probe_dsh_with_retries`).
 fn probe_dsh(url: &str) -> bool {
     let rest = url.strip_prefix("http://").unwrap_or(url);
     let (host, port) = match rest.rsplit_once(':') {
@@ -869,10 +872,10 @@ fn probe_dsh(url: &str) -> bool {
     let Some(sockaddr) = addrs.next() else {
         return false;
     };
-    let Ok(mut stream) = TcpStream::connect_timeout(&sockaddr, Duration::from_millis(1200)) else {
+    let Ok(mut stream) = TcpStream::connect_timeout(&sockaddr, Duration::from_millis(1500)) else {
         return false;
     };
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(1500)));
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(2500)));
     let req = format!(
         "GET / HTTP/1.1\r\nHost: {host}:{port}\r\nAccept-Encoding: identity\r\nConnection: close\r\nUser-Agent: dsh-desktop\r\n\r\n"
     );
@@ -893,6 +896,25 @@ fn probe_dsh(url: &str) -> bool {
         }
     }
     String::from_utf8_lossy(&buf).contains(INDEX_MARKER)
+}
+
+/// Several probe attempts with a small gap between them. The harness serves
+/// the GUI and the agent session from one busy event loop, so its very first
+/// response after (re)start can exceed a single attempt's budget; a false
+/// negative here would make `start_inner` spawn a SECOND server on the same
+/// `~/.dsh`. A refused connection returns immediately, so the retry loop
+/// adds no meaningful latency when nothing is listening — it only waits in
+/// the ambiguous "listening but slow" case.
+fn probe_dsh_with_retries(url: &str, attempts: u32, gap_ms: u64) -> bool {
+    for attempt in 0..attempts {
+        if probe_dsh(url) {
+            return true;
+        }
+        if attempt + 1 < attempts {
+            thread::sleep(Duration::from_millis(gap_ms));
+        }
+    }
+    false
 }
 
 fn set_running(app: &AppHandle, server: &Shared, url: &str) {
@@ -1145,7 +1167,7 @@ fn start_inner(app: &AppHandle, server: &Shared) -> Result<(), String> {
     // happens before resolving node/runtime so attach mode needs nothing.
     let port = default_port();
     let default_url = format!("http://127.0.0.1:{port}");
-    if probe_dsh(&default_url) {
+    if probe_dsh_with_retries(&default_url, 2, 250) {
         push_log(server, format!("检测到已在运行的 dsh 服务，直接使用 {default_url}"));
         set_running(app, server, &default_url);
         return Ok(());
@@ -1185,6 +1207,32 @@ fn start_inner(app: &AppHandle, server: &Shared) -> Result<(), String> {
             return Ok(());
         }
         if exited && eaddr {
+            // The child died because 3080 is taken. Before falling back to
+            // an OS-assigned port, re-probe patiently: if the occupant is
+            // actually dsh (the fast initial probe false-negatives when the
+            // server is busy), attach to it instead of spawning a duplicate
+            // server that races on the same ~/.dsh.
+            //
+            // Hold the status at Starting for the whole re-probe: the exit
+            // watcher's fixed 1s auto-restart timer calls start() after
+            // setting Error, and start() only no-ops on Running/Starting —
+            // without this hold the watcher would fire mid-probe and race
+            // this branch into spawning a third dsh process.
+            set_status(
+                app,
+                server,
+                ServerStatus::Starting {
+                    detail: "确认 3080 端口占用情况…".to_string(),
+                },
+            );
+            if probe_dsh_with_retries(&default_url, 3, 400) {
+                push_log(
+                    server,
+                    "端口 3080 已被 dsh 服务占用（初始探测超时），直接使用…".to_string(),
+                );
+                set_running(app, server, &default_url);
+                return Ok(());
+            }
             push_log(server, "端口 3080 被其他程序占用，改用系统分配端口…".to_string());
             spawn(app, server, &node, &bin, 0)?;
             return Ok(());
@@ -1279,5 +1327,66 @@ mod tests {
             extract_stale_symlink_path("exists and is not a symlink; remove it so dsh can manage the installation fallback"),
             None
         );
+    }
+
+    #[test]
+    fn probe_detects_a_harness_index_page() {
+        use std::io::ErrorKind;
+        use std::sync::mpsc;
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let url = format!("http://127.0.0.1:{port}");
+        let (stop_tx, stop_rx) = mpsc::channel::<()>();
+        // Non-blocking accept loop with a stop signal: a blocking accept()
+        // would never return after the probe succeeds, hanging the test's
+        // join(); serving several connections (rather than one shot) keeps
+        // the probe's retry loop a valid caller.
+        let handle = thread::spawn(move || loop {
+            match listener.accept() {
+                Ok((mut conn, _)) => {
+                    let body = "<html><head><title>DeepSeek Harness</title></head></html>";
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    if conn.write_all(resp.as_bytes()).is_err() {
+                        break;
+                    }
+                    // conn drops here, closing the socket so the probe sees
+                    // EOF.
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => {}
+                Err(_) => break,
+            }
+            if stop_rx.try_recv().is_ok() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        });
+        let mut detected = false;
+        for _ in 0..50 {
+            if probe_dsh(&url) {
+                detected = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        let _ = stop_tx.send(());
+        handle.join().unwrap();
+        assert!(detected, "probe should detect the harness index marker");
+    }
+
+    #[test]
+    fn probe_retries_give_up_on_a_closed_port() {
+        // Functional check only: the retry loop terminates with `false`.
+        // Deliberately no wall-clock bound here — how quickly a refused
+        // connection surfaces is OS-dependent (some Windows builds burn the
+        // whole connect budget instead of failing instantly), and that is a
+        // platform latency detail, not a correctness property of the retry
+        // logic.
+        assert!(!probe_dsh_with_retries("http://127.0.0.1:1", 2, 50));
     }
 }
