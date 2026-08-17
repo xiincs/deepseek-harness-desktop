@@ -719,11 +719,20 @@ pub fn run() {
                 let srv = state.server.clone();
                 let app2 = app.clone();
                 thread::spawn(move || server::restart(&app2, &srv));
+                // A workspace switch is a deliberate summon (the user just
+                // picked a folder to open), same as the tray click/hotkey —
+                // always surface it so they see the switch happen, even if
+                // the window was technically "visible" but buried behind
+                // other windows or on another virtual desktop.
+                show_main_window(app);
+            } else {
+                // No workspace arg: an untargeted duplicate launch (desktop
+                // icon, Start menu, or something this app didn't ask for —
+                // a stale launcher, autostart job). Don't steal focus when
+                // the window is already on screen — see
+                // show_main_window_on_relaunch.
+                show_main_window_on_relaunch(app);
             }
-            // Don't steal focus when the window is already on screen (e.g. a
-            // stale launcher re-fires a duplicate launch while the user is
-            // working elsewhere) — see show_main_window_on_relaunch.
-            show_main_window_on_relaunch(app);
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
