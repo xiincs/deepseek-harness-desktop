@@ -325,6 +325,39 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
+/// Single-instance relaunch path (second launch attempt while the app is
+/// already running). Unlike the tray/hotkey callers, this is *not* a user
+/// summoning the window on purpose — it fires for any duplicate launch,
+/// including one this app didn't ask for (a stale launcher, a file
+/// association, an autostart job). Showing + focusing unconditionally then
+/// yanks the window to the front and steals focus from whatever the user is
+/// doing in another app.
+///
+/// So: only summon the window when it isn't already on screen. If it is
+/// visible and not minimized, leave it completely alone. If it was hidden
+/// to the tray or minimized, surface it normally — that's what a user who
+/// re-launches the app wants. Same thread discipline as `show_main_window`
+/// (window APIs must run on the main/event-loop thread).
+fn show_main_window_on_relaunch(app: &AppHandle) {
+    let app_in_closure = app.clone();
+    let result = app.run_on_main_thread(move || {
+        let app = app_in_closure;
+        if let Some(win) = app.get_webview_window("main") {
+            match (win.is_visible(), win.is_minimized()) {
+                (Ok(true), Ok(false)) => {
+                    // Already on screen — do nothing, don't steal focus.
+                }
+                _ => show_main_window(&app),
+            }
+        } else {
+            eprintln!("[dsh-desktop] show_main_window_on_relaunch: no window labeled \"main\"");
+        }
+    });
+    if let Err(e) = result {
+        eprintln!("[dsh-desktop] show_main_window_on_relaunch: run_on_main_thread failed: {e}");
+    }
+}
+
 /// Disables WebView2's built-in right-click context menu (Back / Forward /
 /// Reload / Inspect / …). The harness page is a plain remote page with no
 /// Tauri-side navigation UI of its own, so that default menu was the only
@@ -687,7 +720,10 @@ pub fn run() {
                 let app2 = app.clone();
                 thread::spawn(move || server::restart(&app2, &srv));
             }
-            show_main_window(app);
+            // Don't steal focus when the window is already on screen (e.g. a
+            // stale launcher re-fires a duplicate launch while the user is
+            // working elsewhere) — see show_main_window_on_relaunch.
+            show_main_window_on_relaunch(app);
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
