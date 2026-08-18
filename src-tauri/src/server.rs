@@ -37,7 +37,7 @@ pub const TRAY_ID: &str = "main-tray";
 pub const DEFAULT_PORT: u16 = 3080;
 
 /// Default npm version spec for the managed `@deepseek-ai/dsh` runtime.
-const DSH_VERSION_DEFAULT: &str = "0.1.0-rc.6";
+const DSH_VERSION_DEFAULT: &str = "0.1.0-rc.7";
 /// Marker found verbatim in the harness index page (served uncompressed).
 const INDEX_MARKER: &str = "DeepSeek Harness";
 /// Max lines kept in the in-memory log ring buffer.
