@@ -1444,6 +1444,18 @@ function languageExtensionForPath(path) {
   }
 }
 
+// CodeMirror's default line splitting treats \r\n, \r, and \n alike but
+// always rejoins with plain \n on toString() — silently dropping every \r
+// the instant a CRLF file is mounted, with zero user edits. Left alone,
+// that makes isDirty() below (a plain string compare) see every CRLF file
+// as dirty right after opening it, popping the discard-changes confirm on
+// switching/closing it with nothing actually changed. Telling CodeMirror
+// the document's real separator up front (see mountEditor) makes
+// toString() rejoin with it too, so an unedited doc round-trips losslessly.
+function lineSeparatorExtension(CM, text) {
+  return text.includes("\r\n") ? CM.EditorState.lineSeparator.of("\r\n") : [];
+}
+
 function isDirty() {
   return currentEditorView !== null && currentSavedContent !== null && currentEditorView.state.doc.toString() !== currentSavedContent;
 }
@@ -1492,7 +1504,12 @@ function mountEditor(path, preview) {
       els.panelPreviewBody.textContent = t("cannotReadHistoricalContent");
       return;
     }
-    const extensions = [CM.basicSetup, ...buildCodeMirrorBaseExtensions(), CM.EditorState.readOnly.of(true)];
+    const extensions = [
+      CM.basicSetup,
+      ...buildCodeMirrorBaseExtensions(),
+      CM.EditorState.readOnly.of(true),
+      lineSeparatorExtension(CM, originalText),
+    ];
     const lang = languageExtensionForPath(path);
     if (lang) extensions.push(lang);
     currentEditorView = new CM.EditorView({ doc: originalText, extensions, parent: els.panelPreviewBody });
@@ -1519,6 +1536,7 @@ function mountEditor(path, preview) {
   const extensions = [
     CM.basicSetup,
     ...buildCodeMirrorBaseExtensions(),
+    lineSeparatorExtension(CM, current.content),
     CM.keymap.of([
       CM.indentWithTab,
       { key: "Mod-s", preventDefault: true, run: () => (saveCurrentEdit(), true) },
