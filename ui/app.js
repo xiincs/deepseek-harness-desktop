@@ -1253,26 +1253,28 @@ const LOCKED_WORKSPACE_KEY = "dsh-desktop-locked-workspace";
 // user decision.
 let lockedWorkspace = localStorage.getItem(LOCKED_WORKSPACE_KEY) || null;
 
-// Paths of directories the user collapsed. The tree is rebuilt from scratch
-// on every poll (see refreshTreeAndGitStatus's replaceChildren), so without
-// this the collapsed state would be lost and folders would re-expand within
-// PANEL_POLL_MS of being collapsed.
+// Paths of directories the user explicitly expanded. Every directory starts
+// collapsed — landing on a big workspace fully unfolded is mostly noise —
+// so this only has to remember departures from that default. The tree is
+// rebuilt from scratch on every poll (see refreshTreeAndGitStatus's
+// replaceChildren), so without this an expanded folder would collapse back
+// within PANEL_POLL_MS of being opened.
 //
 // TreeEntry.path is workspace-RELATIVE (see panel.rs), so these keys are
-// only meaningful for the workspace they were collapsed in — switching
+// only meaningful for the workspace they were expanded in — switching
 // workspaces must clear the set, or workspace B would silently inherit A's
-// collapse state for any same-relative-path directory (the same reason the
+// expanded state for any same-relative-path directory (the same reason the
 // workspace-switch handler closes the open preview).
-const collapsedDirs = new Set();
+const expandedDirs = new Set();
 
 // Which workspace the last-rendered tree belonged to: lockedWorkspace when
-// pinned, else the auto-follow resolution. A change clears collapsedDirs.
+// pinned, else the auto-follow resolution. A change clears expandedDirs.
 let renderedWorkspaceKey = null;
 
 function applyWorkspaceChange(workspaceKey) {
   if (workspaceKey === null || workspaceKey === renderedWorkspaceKey) return;
   renderedWorkspaceKey = workspaceKey;
-  collapsedDirs.clear();
+  expandedDirs.clear();
 }
 
 function renderTreeNode(entry, gitMap, container) {
@@ -1291,9 +1293,9 @@ function renderTreeNode(entry, gitMap, container) {
   // sitting one indent level to the left of them.
   if (hasChildren) {
     row.appendChild(iconEl("chevron-right", "tree-caret"));
-    // Default is expanded; collapsed dirs render collapsed from the start so
-    // the user's choice survives the periodic full rebuild.
-    row.classList.toggle("tree-expanded", !collapsedDirs.has(entry.path));
+    // Default is collapsed; explicitly-expanded dirs render expanded from
+    // the start so the user's choice survives the periodic full rebuild.
+    row.classList.toggle("tree-expanded", expandedDirs.has(entry.path));
   } else {
     const spacer = document.createElement("span");
     spacer.className = "tree-caret-spacer";
@@ -1318,26 +1320,48 @@ function renderTreeNode(entry, gitMap, container) {
   if (hasChildren) {
     const childWrap = document.createElement("div");
     childWrap.className = "tree-children";
-    if (collapsedDirs.has(entry.path)) childWrap.classList.add("collapsed");
+    if (!expandedDirs.has(entry.path)) childWrap.classList.add("collapsed");
     container.appendChild(childWrap);
     row.addEventListener("click", () => {
       const collapsed = childWrap.classList.toggle("collapsed");
       row.classList.toggle("tree-expanded", !collapsed);
-      if (collapsed) collapsedDirs.add(entry.path);
-      else collapsedDirs.delete(entry.path);
+      if (collapsed) expandedDirs.delete(entry.path);
+      else expandedDirs.add(entry.path);
     });
     for (const child of entry.children) {
       renderTreeNode(child, gitMap, childWrap);
     }
   } else if (!entry.isDir) {
-    row.addEventListener("click", () => {
+    // Selection lookup key for syncTreeSelectionHighlight() below — the
+    // click handler needs to find *this* row again from a live DOM query
+    // after an await, not from a closed-over reference that a concurrent
+    // poll-driven rebuild may have already detached.
+    row.dataset.path = entry.path;
+    row.addEventListener("click", async () => {
       if (currentPreviewPath === entry.path) {
-        closePreview();
+        await closePreview();
       } else {
-        showPreview(entry.path);
+        await showPreview(entry.path);
       }
+      syncTreeSelectionHighlight();
     });
   }
+}
+
+// Moves .tree-row-selected to match currentPreviewPath right now, instead of
+// leaving it to the next full tree rebuild — up to PANEL_POLL_MS away — to
+// pick up via renderTreeNode's own currentPreviewPath comparison above.
+// Re-queries the live DOM by data-path rather than operating on a specific
+// row element a caller might hand in: a poll can rebuild the tree out from
+// under an in-flight click (e.g. while confirmDiscardIfNeeded's dialog is
+// open), which would leave any captured row reference pointing at an
+// already-detached node.
+function syncTreeSelectionHighlight() {
+  const prev = els.panelTree.querySelector(".tree-row-selected");
+  if (prev) prev.classList.remove("tree-row-selected");
+  if (currentPreviewPath === null) return;
+  const row = els.panelTree.querySelector(`.tree-file[data-path="${CSS.escape(currentPreviewPath)}"]`);
+  if (row) row.classList.add("tree-row-selected");
 }
 
 // ── file preview / edit (CodeMirror) ────────────────────────────────────
@@ -1901,10 +1925,11 @@ function lockWorkspace(path) {
 }
 
 // Reveals a just-selected tree row: expands every collapsed ancestor
-// (renderTreeNode's own hasChildren click handler is the only thing that
-// ever collapses one — a user fold from an earlier look at the tree) so the
-// row is actually in the visible/scrollable flow, not sitting inside a
-// display:none .tree-children, then scrolls it into view.
+// (directories default to collapsed — see expandedDirs — and otherwise stay
+// that way until a user fold/unfold, so an ancestor sitting collapsed here
+// is the common case, not an edge case) so the row is actually in the
+// visible/scrollable flow, not sitting inside a display:none .tree-children,
+// then scrolls it into view.
 function revealSelectedTreeRow() {
   const row = els.panelTree.querySelector(".tree-row-selected");
   if (!row) return;
@@ -1939,6 +1964,7 @@ async function handleFileMention(absPath) {
     els.panelPreviewTitle.title = absPath;
     els.cardFile.classList.remove("hidden");
     els.panelPreviewBody.textContent = t("fileNotInKnownWorkspace");
+    syncTreeSelectionHighlight();
     return;
   }
 
