@@ -2445,6 +2445,10 @@ function markdownPreviewStyle() {
     th, td { border: 1px solid ${v("--card-border")}; padding: 5px 10px; }
     img { max-width: 100%; }
     hr { border: none; border-top: 1px solid ${v("--card-border")}; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: ${v("--card-border")}; border-radius: 6px; }
+    ::-webkit-scrollbar-thumb:hover { background: ${v("--muted")}; }
   `;
 }
 

@@ -49,6 +49,29 @@
   box-sizing: border-box;
 }
 
+/* WebView2 is Chromium, so it takes the ::-webkit-scrollbar pseudo-elements
+   rather than the OS's native (light-only-looking) scrollbar chrome. Reuses
+   existing tokens instead of a new color so this needs no light/dark split
+   of its own — --card-border/--muted already flip via the media query
+   above. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--card-border);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 html,
 body {
   margin: 0;
