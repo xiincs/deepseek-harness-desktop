@@ -518,12 +518,26 @@
     <div id="confirm-dialog-overlay" class="hidden">
       <div id="confirm-dialog" role="alertdialog" aria-modal="true" aria-describedby="confirm-dialog-message">
         <p id="confirm-dialog-message"></p>
+        <!-- Only shown by showPromptDialog (New File/Folder, Rename) — plain
+             confirm/alert dialogs from before leave this hidden and empty. -->
+        <input id="confirm-dialog-input" class="hidden" type="text" autocomplete="off" spellcheck="false" />
         <div id="confirm-dialog-actions" class="actions">
           <button id="btn-confirm-dialog-cancel" data-i18n="cancel">取消</button>
           <button id="btn-confirm-dialog-ok" class="primary"></button>
         </div>
       </div>
     </div>
+    <!--
+      File tree right-click menu (see openTreeContextMenu in app.js) — built
+      fresh into this one empty container on every right-click rather than a
+      static template, since which items show up depends on what was
+      clicked (a file, a folder, or empty tree space). Reuses .app-menu-item/
+      .app-menu-sep directly (see #app-menu above) rather than a parallel
+      set of look-alike item styles — only the outer positioning differs
+      (position: fixed at the click point, not anchored under a toolbar
+      button).
+    -->
+    <div id="tree-context-menu" class="context-menu hidden" role="menu"></div>
     <!--
       A real code editor (CodeMirror 6), not a highlighter + textarea +
       hand-rolled diff view: opening a file goes straight to an editable

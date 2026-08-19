@@ -30,6 +30,7 @@ const els = {
   panel: document.getElementById("panel"),
   panelWorkspaceSelect: document.getElementById("panel-workspace-select"),
   panelTree: document.getElementById("panel-tree"),
+  treeContextMenu: document.getElementById("tree-context-menu"),
   btnPanelRefresh: document.getElementById("btn-panel-refresh"),
   resizePanelContent: document.getElementById("resize-panel-content"),
   panelCards: document.getElementById("panel-cards"),
@@ -93,6 +94,7 @@ const els = {
   btnMarkdownToggle: document.getElementById("btn-preview-markdown-toggle"),
   confirmDialogOverlay: document.getElementById("confirm-dialog-overlay"),
   confirmDialogMessage: document.getElementById("confirm-dialog-message"),
+  confirmDialogInput: document.getElementById("confirm-dialog-input"),
   btnConfirmDialogCancel: document.getElementById("btn-confirm-dialog-cancel"),
   btnConfirmDialogOk: document.getElementById("btn-confirm-dialog-ok"),
 };
@@ -152,6 +154,24 @@ const STRINGS = {
     unsavedChangesTitle: "有未保存的改动",
     previewMarkdown: "预览",
     editMarkdown: "编辑",
+    newFile: "新建文件",
+    newFolder: "新建文件夹",
+    rename: "重命名",
+    deleteEntry: "删除",
+    copyPath: "复制路径",
+    copyRelativePath: "复制相对路径",
+    revealInFileManager: "在文件资源管理器中显示",
+    newFileNamePrompt: "输入新文件名",
+    newFolderNamePrompt: "输入新文件夹名",
+    renamePrompt: "输入新名称",
+    create: "创建",
+    confirmDeleteEntry: (path) => `确定要删除 "${path}" 吗？此操作会将其移至回收站，而不是永久删除。`,
+    createEntryFailed: (err) => `创建失败: ${err}`,
+    renameEntryFailed: (err) => `重命名失败: ${err}`,
+    moveEntryFailed: (err) => `移动失败: ${err}`,
+    deleteEntryFailed: (err) => `删除失败: ${err}`,
+    revealFailed: (err) => `无法打开文件资源管理器: ${err}`,
+    copyPathFailed: (err) => `复制路径失败: ${err}`,
     revert: "还原",
     revertTitle: "放弃改动，还原为已保存内容",
     save: "保存",
@@ -259,6 +279,24 @@ const STRINGS = {
     unsavedChangesTitle: "Unsaved changes",
     previewMarkdown: "Preview",
     editMarkdown: "Edit",
+    newFile: "New File",
+    newFolder: "New Folder",
+    rename: "Rename",
+    deleteEntry: "Delete",
+    copyPath: "Copy Path",
+    copyRelativePath: "Copy Relative Path",
+    revealInFileManager: "Reveal in File Manager",
+    newFileNamePrompt: "Enter a file name",
+    newFolderNamePrompt: "Enter a folder name",
+    renamePrompt: "Enter a new name",
+    create: "Create",
+    confirmDeleteEntry: (path) => `Delete "${path}"? This moves it to the recycle bin, not a permanent delete.`,
+    createEntryFailed: (err) => `Failed to create: ${err}`,
+    renameEntryFailed: (err) => `Rename failed: ${err}`,
+    moveEntryFailed: (err) => `Move failed: ${err}`,
+    deleteEntryFailed: (err) => `Delete failed: ${err}`,
+    revealFailed: (err) => `Failed to open file manager: ${err}`,
+    copyPathFailed: (err) => `Failed to copy path: ${err}`,
     revert: "Revert",
     revertTitle: "Discard changes and revert to the last saved version",
     save: "Save",
@@ -1708,6 +1746,16 @@ function renderTreeNode(entry, gitMap, container) {
 
   container.appendChild(row);
 
+  // stopPropagation so this doesn't also bubble up to #panel-tree's own
+  // contextmenu listener (the "empty tree area" case, meaning "the
+  // workspace root") — a right-click that landed on an actual row always
+  // means that row's entry, never the root.
+  row.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openTreeContextMenu(e.clientX, e.clientY, { path: entry.path, isDir: entry.isDir });
+  });
+
   if (hasChildren) {
     const childWrap = document.createElement("div");
     childWrap.className = "tree-children";
@@ -1753,6 +1801,149 @@ function syncTreeSelectionHighlight() {
   if (currentPreviewPath === null) return;
   const row = els.panelTree.querySelector(`.tree-file[data-path="${CSS.escape(currentPreviewPath)}"]`);
   if (row) row.classList.add("tree-row-selected");
+}
+
+// ── tree context menu (new/rename/delete/copy path/reveal) ──────────────
+//
+// Built fresh into #tree-context-menu on every right-click rather than a
+// static template with per-item show/hide — see the HTML comment above
+// that element. `target` is { path, isDir } for a right-clicked row, or
+// null for empty tree space (meaning "the workspace root").
+
+function parentDirFor(target) {
+  if (target === null) return "";
+  if (target.isDir) return target.path;
+  const idx = target.path.lastIndexOf("/");
+  return idx === -1 ? "" : target.path.slice(0, idx);
+}
+
+// If the entry a rename/move/delete just affected was the open preview (or
+// a folder that contained it), the preview is now pointing at a path that
+// no longer exists there — closing it beats leaving a stale, unsaveable
+// editor open with no visible sign anything happened to its file.
+function closePreviewIfAffected(affectedRelPath) {
+  if (currentPreviewPath === null) return;
+  if (currentPreviewPath === affectedRelPath || currentPreviewPath.startsWith(affectedRelPath + "/")) {
+    closePreviewUnchecked();
+  }
+}
+
+function isTreeContextMenuOpen() {
+  return !els.treeContextMenu.classList.contains("hidden");
+}
+
+function closeTreeContextMenu() {
+  els.treeContextMenu.classList.add("hidden");
+}
+
+function addContextMenuItem(label, onClick, danger = false) {
+  const item = document.createElement("button");
+  item.className = "app-menu-item" + (danger ? " context-menu-item-danger" : "");
+  item.textContent = label;
+  item.addEventListener("click", () => {
+    closeTreeContextMenu();
+    onClick();
+  });
+  els.treeContextMenu.appendChild(item);
+}
+
+function addContextMenuSeparator() {
+  const sep = document.createElement("div");
+  sep.className = "app-menu-sep";
+  els.treeContextMenu.appendChild(sep);
+}
+
+async function createTreeEntry(isDir, target) {
+  const parentPath = parentDirFor(target);
+  const name = await showPromptDialog(t(isDir ? "newFolderNamePrompt" : "newFileNamePrompt"), "", t("create"));
+  if (name === null) return;
+  try {
+    await invoke(isDir ? "create_dir" : "create_file", { parentPath, name, overridePath: lockedWorkspace });
+    // So the new entry is actually visible after the refresh below instead
+    // of sitting inside a folder collapsed by default (see expandedDirs) —
+    // only meaningful when creating inside a real folder; parentPath === ""
+    // (workspace root) is never itself a collapsible row.
+    if (parentPath !== "") expandedDirs.add(parentPath);
+    await refreshTreeAndGitStatus();
+  } catch (err) {
+    showAlertDialog(t("createEntryFailed", err));
+  }
+}
+
+async function renameTreeEntry(target) {
+  const currentName = target.path.slice(target.path.lastIndexOf("/") + 1);
+  const newName = await showPromptDialog(t("renamePrompt"), currentName, t("rename"));
+  if (newName === null || newName === currentName) return;
+  try {
+    await invoke("rename_entry", { path: target.path, newName, overridePath: lockedWorkspace });
+    closePreviewIfAffected(target.path);
+    await refreshTreeAndGitStatus();
+  } catch (err) {
+    showAlertDialog(t("renameEntryFailed", err));
+  }
+}
+
+async function deleteTreeEntry(target) {
+  if (!(await showConfirmDialog(t("confirmDeleteEntry", target.path), t("deleteEntry"), true))) return;
+  try {
+    await invoke("delete_entry", { path: target.path, overridePath: lockedWorkspace });
+    closePreviewIfAffected(target.path);
+    await refreshTreeAndGitStatus();
+  } catch (err) {
+    showAlertDialog(t("deleteEntryFailed", err));
+  }
+}
+
+async function copyTreePath(target) {
+  try {
+    const abs = await invoke("get_absolute_path", { path: target.path, overridePath: lockedWorkspace });
+    await navigator.clipboard.writeText(abs);
+  } catch (err) {
+    showAlertDialog(t("copyPathFailed", err));
+  }
+}
+
+async function copyTreeRelativePath(target) {
+  try {
+    await navigator.clipboard.writeText(target.path);
+  } catch (err) {
+    showAlertDialog(t("copyPathFailed", err));
+  }
+}
+
+async function revealTreeEntry(target) {
+  try {
+    await invoke("reveal_in_file_manager", { path: target.path, overridePath: lockedWorkspace });
+  } catch (err) {
+    showAlertDialog(t("revealFailed", err));
+  }
+}
+
+function openTreeContextMenu(x, y, target) {
+  els.treeContextMenu.replaceChildren();
+  addContextMenuItem(t("newFile"), () => createTreeEntry(false, target));
+  addContextMenuItem(t("newFolder"), () => createTreeEntry(true, target));
+  if (target !== null) {
+    addContextMenuSeparator();
+    addContextMenuItem(t("rename"), () => renameTreeEntry(target));
+    addContextMenuItem(t("deleteEntry"), () => deleteTreeEntry(target), true);
+    addContextMenuSeparator();
+    addContextMenuItem(t("copyPath"), () => copyTreePath(target));
+    addContextMenuItem(t("copyRelativePath"), () => copyTreeRelativePath(target));
+    addContextMenuItem(t("revealInFileManager"), () => revealTreeEntry(target));
+  }
+
+  // Positioned at the click point, then clamped so it can't render off the
+  // right/bottom edge of the window — measured after un-hiding (offsetWidth/
+  // Height are 0 on a display:none element).
+  els.treeContextMenu.classList.remove("hidden");
+  els.treeContextMenu.style.left = "0px";
+  els.treeContextMenu.style.top = "0px";
+  const rect = els.treeContextMenu.getBoundingClientRect();
+  const left = Math.min(x, window.innerWidth - rect.width - 4);
+  const top = Math.min(y, window.innerHeight - rect.height - 4);
+  els.treeContextMenu.style.left = `${Math.max(4, left)}px`;
+  els.treeContextMenu.style.top = `${Math.max(4, top)}px`;
 }
 
 // ── file preview / edit (CodeMirror) ────────────────────────────────────
@@ -1940,17 +2131,40 @@ function closeDialog(result) {
 // resolve any still-open dialog first regardless, so a stray leftover
 // listener can never settle two different Promises out from under this one
 // `dialogSettle` slot.
-function openDialog({ message, confirmLabel, showCancel, danger }) {
+//
+// `promptDefault` (undefined for a plain confirm/alert) turns this into a
+// text-input prompt instead — shown pre-filled and focused/selected, Enter
+// submits (see the input's own keydown listener below), and the OK button's
+// own click handler still just resolves `true`/`false` same as always;
+// showPromptDialog (below) is what reads the input's value once this
+// promise settles, rather than this function's own resolved value carrying
+// it — the dialog is already hidden again by then, but a hidden input still
+// holds whatever was last typed into it.
+function openDialog({ message, confirmLabel, showCancel, danger, promptDefault }) {
   if (dialogSettle) closeDialog(false);
   els.confirmDialogMessage.textContent = message;
   els.btnConfirmDialogOk.textContent = confirmLabel;
   els.btnConfirmDialogOk.classList.toggle("danger", !!danger);
   els.btnConfirmDialogCancel.classList.toggle("hidden", !showCancel);
+  const isPrompt = promptDefault !== undefined;
+  els.confirmDialogInput.classList.toggle("hidden", !isPrompt);
+  if (isPrompt) {
+    els.confirmDialogInput.value = promptDefault;
+    els.btnConfirmDialogOk.disabled = promptDefault.trim() === "";
+  } else {
+    els.btnConfirmDialogOk.disabled = false;
+  }
   els.confirmDialogOverlay.classList.remove("hidden");
-  // Defaults focus to Cancel (not OK) when there is one: every current use
-  // of showCancel is a destructive "throw away work" action, so an
-  // accidental Enter keypress should land on the safe choice.
-  (showCancel ? els.btnConfirmDialogCancel : els.btnConfirmDialogOk).focus();
+  if (isPrompt) {
+    els.confirmDialogInput.focus();
+    els.confirmDialogInput.select();
+  } else {
+    // Defaults focus to Cancel (not OK) when there is one: every current
+    // non-prompt use of showCancel is a destructive "throw away work"
+    // action, so an accidental Enter keypress should land on the safe
+    // choice.
+    (showCancel ? els.btnConfirmDialogCancel : els.btnConfirmDialogOk).focus();
+  }
   return new Promise((resolve) => {
     dialogSettle = resolve;
   });
@@ -1962,6 +2176,18 @@ function showConfirmDialog(message, confirmLabel, danger = false) {
 
 function showAlertDialog(message) {
   return openDialog({ message, confirmLabel: t("gotIt"), showCancel: false });
+}
+
+// Resolves to the trimmed entered text, or null if cancelled or left empty
+// (OK is disabled while empty anyway — see openDialog/the input listener
+// below — but an Escape/overlay-click cancel still needs its own null,
+// distinct from "confirmed with an empty string" which can't actually
+// happen here).
+async function showPromptDialog(message, defaultValue, confirmLabel) {
+  const confirmed = await openDialog({ message, confirmLabel, showCancel: true, promptDefault: defaultValue });
+  if (!confirmed) return null;
+  const trimmed = els.confirmDialogInput.value.trim();
+  return trimmed === "" ? null : trimmed;
 }
 
 // True if it's safe to proceed with whatever's about to replace or close
@@ -2661,6 +2887,19 @@ async function init() {
     await refreshDiffView();
     flashRefreshSuccess(els.btnDiffRefresh);
   });
+  // Empty tree space — a row's own contextmenu listener (renderTreeNode)
+  // stops propagation before this ever fires for a click that landed on an
+  // actual entry, so reaching here always means "the workspace root".
+  els.panelTree.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    openTreeContextMenu(e.clientX, e.clientY, null);
+  });
+  document.addEventListener("click", (e) => {
+    if (isTreeContextMenuOpen() && !els.treeContextMenu.contains(e.target)) closeTreeContextMenu();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && isTreeContextMenuOpen()) closeTreeContextMenu();
+  });
   els.panelWorkspaceSelect.addEventListener("change", async () => {
     const value = els.panelWorkspaceSelect.value;
     if (!(await confirmDiscardIfNeeded())) {
@@ -2698,6 +2937,17 @@ async function init() {
     if (e.key === "Escape" && !els.confirmDialogOverlay.classList.contains("hidden")) {
       closeDialog(false);
     }
+  });
+  // Enter submits a prompt dialog the same as clicking OK — there's no
+  // <form> here for the browser's own implicit-submit-on-Enter to kick in.
+  // Disabling OK while empty (rather than letting it submit blank) matches
+  // showPromptDialog's own "empty resolves to null" contract without a
+  // round-trip through a resolved-then-rejected empty name.
+  els.confirmDialogInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !els.btnConfirmDialogOk.disabled) els.btnConfirmDialogOk.click();
+  });
+  els.confirmDialogInput.addEventListener("input", () => {
+    els.btnConfirmDialogOk.disabled = els.confirmDialogInput.value.trim() === "";
   });
 
   els.btnUpdateDismiss.addEventListener("click", () => {

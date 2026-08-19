@@ -702,6 +702,16 @@ pub fn reveal_in_file_manager(app: &tauri::AppHandle, root: &Path, rel_path: &st
     app.opener().reveal_item_in_dir(&target).map_err(|e| e.to_string())
 }
 
+/// The tree's "Copy Path" context menu item: `rel_path` resolved to a real,
+/// OS-native absolute path string (backslash-separated on Windows) — the
+/// client only ever has the `/`-separated workspace-relative form
+/// (TreeEntry.path), and string-concatenating that onto a workspace root
+/// itself in JS would need to reimplement platform-correct path joining
+/// there for no reason when Path::join already does it correctly here.
+pub fn absolute_path(root: &Path, rel_path: &str) -> Result<String, String> {
+    Ok(resolve_within_root(root, rel_path)?.to_string_lossy().into_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1241,6 +1251,29 @@ mod tests {
         let result = delete_entry(&dir, &escaping_rel_path);
         assert!(result.is_err());
         assert!(outside.join("secret.txt").exists());
+
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn absolute_path_resolves_a_workspace_relative_path() {
+        let dir = scratch_dir("abs-path");
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(dir.join("src").join("main.rs"), "").unwrap();
+        let result = absolute_path(&dir, "src/main.rs").unwrap();
+        assert_eq!(std::path::Path::new(&result), dir.join("src").join("main.rs").canonicalize().unwrap());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn absolute_path_rejects_a_path_that_escapes_root() {
+        let dir = scratch_dir("abs-path-escape");
+        let outside = scratch_dir("abs-path-escape-outside-target");
+        fs::write(outside.join("secret.txt"), "x").unwrap();
+        let escaping_rel_path = format!("../{}/secret.txt", outside.file_name().unwrap().to_string_lossy());
+
+        assert!(absolute_path(&dir, &escaping_rel_path).is_err());
 
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&outside);
