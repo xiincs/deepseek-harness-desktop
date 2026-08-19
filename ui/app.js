@@ -2442,14 +2442,83 @@ function isMarkdownPath(path) {
 // …). An empty sandbox="" blocks script execution structurally (no
 // allow-scripts, no allow-same-origin) rather than relying on correctly
 // stripping every dangerous tag/attribute ourselves.
-function renderMarkdownPreview(container, text) {
+async function renderMarkdownPreview(container, text) {
   container.replaceChildren();
   const frame = document.createElement("iframe");
   frame.className = "markdown-preview-frame";
   frame.setAttribute("sandbox", "");
   container.appendChild(frame);
-  const html = window.marked.parse(text);
+  const html = await embedLocalMarkdownImages(window.marked.parse(text), currentPreviewPath);
+  // A newer render (a different file, or this same pane toggled off and
+  // back on) may have already replaced `frame` inside `container` while the
+  // image lookups above were in flight, leaving this one detached — writing
+  // to a detached iframe's srcdoc is harmless, but skip the now-pointless
+  // work explicitly rather than relying on that.
+  if (!frame.isConnected) return;
   frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><style>${markdownPreviewStyle()}</style></head><body>${html}</body></html>`;
+}
+
+// Resolves a markdown-source-relative image src against the previewed
+// file's own directory, joined and normalized entirely client-side, and
+// returns null for anything that isn't safe to hand to get_editable_preview
+// as a workspace-relative path: an absolute path (POSIX `/…`, Windows
+// `C:\…`, or UNC/drive-relative `\…`), any URL scheme (http:, data:, …
+// — the same regex incidentally also catches `C:\` as a "scheme"), or a
+// `../` chain that climbs back out of the workspace root. This validation
+// matters here specifically because, unlike every other rel_path this app
+// sends over invoke (always tree-derived, never attacker-influenced),
+// this one is parsed out of markdown *content* — untrusted by the same
+// doc comment on renderMarkdownPreview above — and
+// text_preview/editable_preview on the Rust side join rel_path onto the
+// workspace root with no containment check of their own (every existing
+// caller never needed one). Without this, a crafted <img src> could read
+// an arbitrary file off the host and leak its content back into the
+// preview.
+function resolveMarkdownImageSrc(src, markdownDir) {
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(src)) return null;
+  if (/^[/\\]/.test(src)) return null;
+  const segments = markdownDir === "" ? [] : markdownDir.split("/");
+  for (const part of src.split(/[/\\]/)) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      if (segments.length === 0) return null;
+      segments.pop();
+    } else {
+      segments.push(part);
+    }
+  }
+  return segments.length ? segments.join("/") : null;
+}
+
+// marked emits <img src="…"> exactly as written in the markdown source, and
+// a relative path there means "relative to the .md file on disk" — but
+// this preview's srcdoc has no base URL of its own (sandbox="" with no
+// allow-same-origin), so the browser would otherwise resolve it against
+// tauri.localhost, i.e. nowhere. Parses the rendered HTML with a detached
+// DOMParser document (never attached to the real page — scripts in it
+// don't run and it can't affect the live DOM either way), rewrites every
+// same-workspace-relative <img src> to a data: URI via the same
+// get_editable_preview command the ordinary image-file preview already
+// uses, and serializes back to an HTML string for the sandboxed iframe.
+async function embedLocalMarkdownImages(html, markdownPath) {
+  const markdownDir = dirnameOf(markdownPath);
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const imgs = [...doc.querySelectorAll("img[src]")];
+  await Promise.all(
+    imgs.map(async (img) => {
+      const relPath = resolveMarkdownImageSrc(img.getAttribute("src"), markdownDir);
+      if (relPath === null) return;
+      try {
+        const preview = await invoke("get_editable_preview", { path: relPath, overridePath: lockedWorkspace });
+        if (preview.current?.kind === "image") {
+          img.setAttribute("src", `data:${preview.current.mime};base64,${preview.current.base64}`);
+        }
+      } catch {
+        /* leave whatever src it already had — already broken, no regression */
+      }
+    })
+  );
+  return doc.body.innerHTML;
 }
 
 // Mirrors this project's own CSS tokens into the sandboxed iframe (which,
