@@ -458,6 +458,11 @@ body.platform-decorated #toolbar-actions {
   min-height: 240px;
 }
 
+/* font-size/user-select mirror #panel-tree exactly — these rows reuse that
+   sidebar's own .tree-row/.tree-label classes (see renderDiffFile in
+   app.js), which don't set their own font-size, so without repeating it
+   here they'd inherit the page's larger base size instead of matching the
+   tree they're deliberately styled to look like. */
 #diff-list {
   flex: 1;
   display: flex;
@@ -465,6 +470,8 @@ body.platform-decorated #toolbar-actions {
   gap: 2px;
   overflow-y: auto;
   padding: 4px 8px 10px;
+  font-size: 12.5px;
+  user-select: text;
   min-height: 0;
 }
 
