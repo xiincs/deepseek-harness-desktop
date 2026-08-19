@@ -13,6 +13,7 @@
 //! `active_workspace_dir` below for why `DSH_DESKTOP_CWD` alone isn't enough
 //! to know what workspace the panel should show.
 
+use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -32,8 +33,12 @@ use tauri_plugin_opener::OpenerExt;
 const IGNORED_DIR_NAMES: &[&str] = &[".git", "node_modules", "target"];
 /// Caps a pathological workspace (a huge monorepo, or one of the ignored
 /// names above not applying) from blocking the UI thread on a multi-second
-/// directory walk.
-const MAX_ENTRIES: usize = 3000;
+/// directory walk. Higher than it originally was now that list_workspace_tree
+/// spends this budget breadth-first (every already-discovered directory gets
+/// a fair turn before the budget starts going toward anyone's
+/// grandchildren) — a low cap mattered a lot more when one big subtree could
+/// silently absorb the whole thing depth-first.
+const MAX_ENTRIES: usize = 20_000;
 const MAX_DEPTH: usize = 12;
 
 #[derive(Serialize, Clone)]
@@ -49,13 +54,90 @@ pub struct TreeEntry {
     pub children: Option<Vec<TreeEntry>>,
 }
 
-pub fn list_workspace_tree(root: &Path) -> Vec<TreeEntry> {
-    let mut budget = MAX_ENTRIES;
-    read_dir_entries(root, root, 0, &mut budget)
+/// One directory still waiting for its own immediate children to be listed
+/// — `indices` is the path down through `list_workspace_tree`'s `out` (and
+/// each ancestor's own `children`) to reach that directory's `TreeEntry`.
+struct PendingDir {
+    indices: Vec<usize>,
+    full_path: PathBuf,
+    depth: usize,
 }
 
-fn read_dir_entries(root: &Path, dir: &Path, depth: usize, budget: &mut usize) -> Vec<TreeEntry> {
-    if depth > MAX_DEPTH || *budget == 0 {
+pub fn list_workspace_tree(root: &Path) -> Vec<TreeEntry> {
+    let mut budget = MAX_ENTRIES;
+    list_workspace_tree_with_budget(root, &mut budget)
+}
+
+/// Breadth-first, not depth-first — this is the second attempt at this
+/// function, and the difference from the first matters. The first version
+/// recursed into each subdirectory immediately (depth-first): a large/deep
+/// early branch could exhaust the *entire shared budget* before its own
+/// unrelated siblings were even listed. That was fixed by listing a
+/// directory's own entries before recursing into any of them (see
+/// list_dir_shallow) — but that fix only made each *individual* directory
+/// fair against its own children. The same starvation pattern still
+/// recurred one level deeper: a huge subdirectory could still exhaust the
+/// budget before a *sibling* two levels down ever got its own turn, at any
+/// depth, not just the root. Reported twice now (root-level, then again for
+/// folders one level in) — breadth-first actually closes this: every
+/// directory at depth N gets its own immediate children listed before *any*
+/// directory at depth N+1 does, so the budget can only ever run out
+/// "fairly", after giving every already-discovered directory an equal turn
+/// first. Takes `budget` as a parameter (list_workspace_tree above supplies
+/// MAX_ENTRIES) so a test can exhaust a tiny budget without needing to
+/// create thousands of real files.
+fn list_workspace_tree_with_budget(root: &Path, budget: &mut usize) -> Vec<TreeEntry> {
+    let mut out = list_dir_shallow(root, root, budget);
+
+    let mut queue: VecDeque<PendingDir> = VecDeque::new();
+    for (i, entry) in out.iter().enumerate() {
+        if entry.is_dir {
+            queue.push_back(PendingDir { indices: vec![i], full_path: root.join(&entry.name), depth: 1 });
+        }
+    }
+    while let Some(pending) = queue.pop_front() {
+        if pending.depth > MAX_DEPTH || *budget == 0 {
+            continue;
+        }
+        let children = list_dir_shallow(root, &pending.full_path, budget);
+        for (i, child) in children.iter().enumerate() {
+            if child.is_dir {
+                let mut indices = pending.indices.clone();
+                indices.push(i);
+                queue.push_back(PendingDir { indices, full_path: pending.full_path.join(&child.name), depth: pending.depth + 1 });
+            }
+        }
+        node_at_mut(&mut out, &pending.indices).children = Some(children);
+    }
+    out
+}
+
+/// Walks `indices` down through `entries` and each ancestor's own
+/// `children` to reach one specific `TreeEntry`. Every index path this is
+/// ever called with comes from a `PendingDir` the BFS loop above enqueued
+/// while processing that entry's *parent* — by the time this entry's own
+/// turn comes up (queue order preserves discovery order), the parent's
+/// `children` has already been assigned `Some(...)` in an earlier iteration
+/// of that same loop, which is what the `expect` below is relying on.
+fn node_at_mut<'a>(entries: &'a mut [TreeEntry], indices: &[usize]) -> &'a mut TreeEntry {
+    let (&first, rest) = indices.split_first().expect("indices is never empty");
+    let entry = &mut entries[first];
+    if rest.is_empty() {
+        entry
+    } else {
+        node_at_mut(entry.children.as_mut().expect("parent's own children were already assigned before this child was enqueued"), rest)
+    }
+}
+
+/// Lists just `dir`'s own immediate entries — no recursion, unlike the
+/// function this replaced. Every directory in the result starts with
+/// `children: Some(vec![])`, a placeholder `list_workspace_tree`'s BFS loop
+/// either fills in later or leaves as-is (for whichever directories the
+/// shared budget didn't reach) — same "still renders as an expandable, if
+/// empty-looking, folder rather than silently looking like a leaf" reason
+/// the very first version of this budget scheme already established.
+fn list_dir_shallow(root: &Path, dir: &Path, budget: &mut usize) -> Vec<TreeEntry> {
+    if *budget == 0 {
         return Vec::new();
     }
     let Ok(read_dir) = fs::read_dir(dir) else {
@@ -70,19 +152,7 @@ fn read_dir_entries(root: &Path, dir: &Path, depth: usize, budget: &mut usize) -
         b_is_dir.cmp(&a_is_dir).then_with(|| a.file_name().cmp(&b.file_name()))
     });
 
-    // Two passes, not one: every entry directly inside `dir` is listed first
-    // (cheap, one budget unit each) before any recursion into a
-    // subdirectory begins. A single loop that recurses immediately on each
-    // directory hit — the previous shape here — lets one early, huge
-    // subtree (a build-output folder not caught by IGNORED_DIR_NAMES, say)
-    // exhaust the *entire shared budget* depth-first before its own later
-    // siblings in `dir` are even listed, let alone recursed into. Reported
-    // symptom: a workspace root with a large early subdirectory only showed
-    // a handful of its other root-level folders — this was why. With this
-    // split, a large subtree can now only ever starve *its own*
-    // descendants, never entries a sibling call would otherwise show.
     let mut out = Vec::new();
-    let mut subdirs: Vec<(usize, PathBuf)> = Vec::new();
     for entry in entries {
         if *budget == 0 {
             break;
@@ -97,22 +167,7 @@ fn read_dir_entries(root: &Path, dir: &Path, depth: usize, budget: &mut usize) -
         let Ok(rel) = full_path.strip_prefix(root) else { continue };
         let path = rel.to_string_lossy().replace('\\', "/");
         *budget -= 1;
-
-        if is_dir {
-            subdirs.push((out.len(), full_path));
-        }
-        // Directories default to an empty (not absent) children list, same
-        // as read_dir_entries() returning early would've produced before —
-        // a directory whose own turn never comes in the loop below (budget
-        // ran out among its siblings) still renders as an expandable, if
-        // empty-looking, folder rather than silently looking like a leaf.
         out.push(TreeEntry { name, path, is_dir, children: is_dir.then(Vec::new) });
-    }
-    for (index, full_path) in subdirs {
-        if *budget == 0 {
-            break;
-        }
-        out[index].children = Some(read_dir_entries(root, &full_path, depth + 1, budget));
     }
     out
 }
@@ -923,9 +978,9 @@ mod tests {
         // alphabetically-earlier root entry used to consume the *entire*
         // shared budget depth-first before its own root-level siblings were
         // even listed — not just before their children were fetched, they
-        // never got a TreeEntry at all. Calls read_dir_entries directly with
-        // a tiny budget instead of creating thousands of files to exhaust
-        // the real MAX_ENTRIES.
+        // never got a TreeEntry at all. Calls list_workspace_tree_with_budget
+        // directly with a tiny budget instead of creating thousands of files
+        // to exhaust the real MAX_ENTRIES.
         let dir = scratch_dir("tree-budget");
         fs::create_dir_all(dir.join("aaa")).unwrap();
         for i in 1..=5 {
@@ -935,11 +990,48 @@ mod tests {
         fs::write(dir.join("bbb").join("g.txt"), "").unwrap();
 
         let mut budget = 3;
-        let tree = read_dir_entries(&dir, &dir, 0, &mut budget);
+        let tree = list_workspace_tree_with_budget(&dir, &mut budget);
         let names: Vec<_> = tree.iter().map(|e| e.name.as_str()).collect();
 
         assert_eq!(names, vec!["aaa", "bbb"], "bbb must still be listed even though aaa's subtree used up the rest of the budget");
         assert!(!tree[0].children.as_ref().unwrap().is_empty(), "aaa should still get whatever budget remained after both root entries were listed");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tree_lists_a_sibling_directorys_own_children_even_when_an_earlier_siblings_subtree_is_deep() {
+        // Distinguishes true breadth-first from the first fix above, which
+        // only made each *individual* directory's own listing fair against
+        // its own children — not the whole tree fair against itself. aaa's
+        // own subtree here goes three levels deep, deep enough that a
+        // depth-first walk exhausts the whole budget completing it before
+        // ever returning to list bbb/ccc's own, much shallower files —
+        // reproducing the reported "only the first few folders show their
+        // contents when expanded, later ones show nothing" one level below
+        // the root, exactly where the first fix's root-level-only fairness
+        // didn't reach.
+        let dir = scratch_dir("tree-budget-deep-sibling");
+        fs::create_dir_all(dir.join("parent").join("aaa").join("sub").join("subsub")).unwrap();
+        fs::write(dir.join("parent").join("aaa").join("x1.txt"), "").unwrap();
+        fs::write(dir.join("parent").join("aaa").join("sub").join("x2.txt"), "").unwrap();
+        fs::write(dir.join("parent").join("aaa").join("sub").join("subsub").join("x3.txt"), "").unwrap();
+        fs::create_dir_all(dir.join("parent").join("bbb")).unwrap();
+        fs::write(dir.join("parent").join("bbb").join("g.txt"), "").unwrap();
+        fs::create_dir_all(dir.join("parent").join("ccc")).unwrap();
+        fs::write(dir.join("parent").join("ccc").join("h.txt"), "").unwrap();
+
+        // root(1) + parent's own [aaa,bbb,ccc](3) + aaa's own [sub,x1.txt](2)
+        // + sub's own [subsub,x2.txt](2) + subsub's own [x3.txt](1) = 9,
+        // exactly enough for a depth-first walk to fully exhaust aaa's own
+        // subtree before parent's loop ever reaches bbb.
+        let mut budget = 9;
+        let tree = list_workspace_tree_with_budget(&dir, &mut budget);
+
+        let parent = tree.iter().find(|e| e.name == "parent").unwrap();
+        let bbb = parent.children.as_ref().unwrap().iter().find(|e| e.name == "bbb").unwrap();
+        let bbb_names: Vec<_> = bbb.children.as_ref().unwrap().iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(bbb_names, vec!["g.txt"], "bbb's own file must be listed even though aaa's own subtree goes several levels deeper");
 
         let _ = fs::remove_dir_all(&dir);
     }
