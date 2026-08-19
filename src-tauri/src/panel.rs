@@ -17,6 +17,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use base64::Engine as _;
 use serde::Serialize;
 
 /// Directory names never shown in the tree, regardless of workspace — `.git`
@@ -388,6 +389,9 @@ const MAX_PREVIEW_BYTES: u64 = 2_000_000;
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum FileContent {
     Text { content: String },
+    /// Rendered as an <img>, not CodeMirror — see image_mime_type for which
+    /// extensions take this path.
+    Image { mime: String, base64: String },
     Binary,
     TooLarge { bytes: u64 },
     Error { message: String },
@@ -441,6 +445,9 @@ pub fn text_preview(root: &Path, rel_path: &str) -> FileContent {
             message: crate::i18n::tr(lang, "无法读取文件", "Unable to read file").to_string(),
         };
     };
+    if let Some(mime) = image_mime_type(rel_path) {
+        return FileContent::Image { mime: mime.to_string(), base64: base64::engine::general_purpose::STANDARD.encode(&bytes) };
+    }
     // A NUL byte anywhere is a cheap, reliable-enough binary heuristic —
     // the same one git itself uses to decide whether a file diffs as text.
     if bytes.contains(&0) {
@@ -450,6 +457,26 @@ pub fn text_preview(root: &Path, rel_path: &str) -> FileContent {
         Ok(content) => FileContent::Text { content },
         Err(_) => FileContent::Binary,
     }
+}
+
+/// Extension → MIME type for the raster formats this panel renders as an
+/// `<img>` instead of the "binary, no preview" fallback. Deliberately
+/// excludes `.svg`: unlike these, an SVG file is valid UTF-8 text and
+/// already opens as an ordinary editable file today (it fails both the
+/// NUL-byte and utf8 checks below the same way any other text file would) —
+/// routing it through this path instead would trade away editing for a
+/// preview nothing asked to remove.
+fn image_mime_type(rel_path: &str) -> Option<&'static str> {
+    let ext = rel_path.rsplit('.').next()?.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        _ => return None,
+    })
 }
 
 /// The file's content as of `HEAD` via `git show`, independent of the
@@ -853,6 +880,32 @@ mod tests {
         fs::write(dir.join("blob.bin"), [0u8, 1, 2, 3, 0, 255]).unwrap();
         let preview = text_preview(&dir, "blob.bin");
         assert!(matches!(preview, FileContent::Binary));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn text_preview_of_a_png_is_image_not_binary() {
+        let dir = scratch_dir("preview-image");
+        let bytes = [0x89u8, 0x50, 0x4e, 0x47, 0, 1, 2, 3];
+        fs::write(dir.join("pic.png"), bytes).unwrap();
+        match text_preview(&dir, "pic.png") {
+            FileContent::Image { mime, base64 } => {
+                assert_eq!(mime, "image/png");
+                assert_eq!(base64::engine::general_purpose::STANDARD.decode(base64).unwrap(), bytes);
+            }
+            other => panic!("expected Image, got {other:?}"),
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn text_preview_of_an_svg_is_still_text_not_image() {
+        // .svg is deliberately excluded from image_mime_type — it's valid
+        // UTF-8 XML and should stay editable, not become a read-only <img>.
+        let dir = scratch_dir("preview-svg");
+        fs::write(dir.join("icon.svg"), "<svg></svg>").unwrap();
+        let preview = text_preview(&dir, "icon.svg");
+        assert!(matches!(preview, FileContent::Text { .. }));
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -2005,6 +2005,20 @@ function mountEditor(path, preview) {
   }
 
   const current = preview.current;
+  if (current.kind === "image") {
+    // Read-only, like binary/tooLarge/error below — nothing here ever
+    // creates a currentEditorView, so destroyEditor()'s already-reset state
+    // (null editor, setDirty(false)) from the top of this function is left
+    // untouched rather than needing its own save/dirty handling.
+    const wrap = document.createElement("div");
+    wrap.className = "image-preview";
+    const img = document.createElement("img");
+    img.src = `data:${current.mime};base64,${current.base64}`;
+    img.alt = path;
+    wrap.appendChild(img);
+    els.panelPreviewBody.appendChild(wrap);
+    return;
+  }
   if (current.kind === "binary") {
     els.panelPreviewBody.textContent = t("binaryFileNoPreview");
     return;
