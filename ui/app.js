@@ -544,8 +544,16 @@ function initWindowChrome() {
 
 const ICON_MAXIMIZE =
   '<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor"/></svg>';
+// Standard "restore" glyph: a back square peeking out from behind a front
+// square, not two fully-drawn squares stroked on top of each other — the
+// previous version drew both rects in full, so their strokes crossed
+// through the overlap region as a messy X instead of reading as two offset
+// windows. The back square's path only traces its *visible* edges (top,
+// right, and the left/bottom stubs that poke out past the front square) —
+// same margins (0.5 from each viewBox edge) as ICON_MAXIMIZE above, so
+// the two glyphs read as the same visual weight when toggled between.
 const ICON_RESTORE =
-  '<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><rect x="3" y="0.5" width="6.5" height="6.5" fill="none" stroke="currentColor"/><rect x="0.5" y="3" width="6.5" height="6.5" fill="none" stroke="currentColor"/></svg>';
+  '<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3.5 3.5V0.5H9.5V6.5H6.5" fill="none" stroke="currentColor"/><rect x="0.5" y="3.5" width="6" height="6" fill="none" stroke="currentColor"/></svg>';
 
 async function syncMaximizeIcon() {
   const maximized = await appWindow.isMaximized();
