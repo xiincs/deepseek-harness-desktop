@@ -1306,13 +1306,22 @@ body.resizing-rows #panel-preview-body {
   background: var(--bg);
 }
 
-/* Oversized box (100%/0.9 of #content) scaled back down to exactly 100%,
-   anchored top-left — not a plain transform on a normally-sized iframe,
-   which would just shrink the already-rendered pixels and leave a dead
-   gap along the right/bottom edges. Giving the iframe genuinely more CSS
-   pixels to lay out into before scaling means the harness page's own
-   layout reflows at 90%, the same as if it had zoomed itself out: smaller
-   text/controls, ~11% more content visible, filling the container exactly.
+/* zoom, not transform: scale (used here previously — see issue #26):
+   transform is paint-only, so the iframe got rasterized at its full size
+   and then the compositor bitmap-resampled that layer down 10%, which is
+   what made the harness content visibly blurry. zoom is the same
+   layout-level mechanism real browser page-zoom (Ctrl+-) uses — the
+   harness page's own layout reflows at 90% and is rasterized directly at
+   that final size (smaller text/controls, ~11% more content visible),
+   staying crisp, while the box on our side stays a plain 100%: zoom
+   changes the content density inside the box, not the box's own on-screen
+   size, so — unlike transform — it needs no oversizing to compensate (that
+   instead just overflowed #content on the right/bottom).
+   width/height must still be explicit percentages, not just `inset: 0`:
+   iframe is a replaced element, and replaced elements don't stretch to
+   fill an auto-sized box the way a div does even with all four insets
+   pinned to 0 — omitting them collapsed #harness-frame to its intrinsic
+   default (~300×150) shrunk further by zoom, a small box pinned top-left.
    Independent of the disable_zoom_control WebView2 setting in lib.rs
    (unbounded, user-triggered, no way back to 100%) — this is a fixed
    value we set once, not user-adjustable, so it can't end up stuck. */
@@ -1320,11 +1329,10 @@ body.resizing-rows #panel-preview-body {
   position: absolute;
   top: 0;
   left: 0;
-  width: calc(100% / 0.9);
-  height: calc(100% / 0.9);
+  width: 100%;
+  height: 100%;
   border: none;
-  transform: scale(0.9);
-  transform-origin: top left;
+  zoom: 0.9;
 }
 
 #harness-frame.hidden {
