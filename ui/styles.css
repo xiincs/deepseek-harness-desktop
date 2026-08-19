@@ -587,7 +587,7 @@ body.platform-decorated #toolbar-actions {
    long ones actually hit the cap and scroll internally. */
 .diff-file-body {
   max-height: 340px;
-  overflow-y: auto;
+  overflow: auto;
   margin: 2px 0 6px 20px;
   border: 1px solid var(--card-border);
   border-radius: 8px;
