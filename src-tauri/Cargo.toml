@@ -47,6 +47,11 @@ base64 = "0.22"
 # command, pulled in directly since only the native (non-JS) side needs it
 # here.
 sys-locale = "0.3"
+# Deleting a file/folder from the tree's context menu (panel.rs) goes to the
+# OS recycle bin/trash, not fs::remove_file/remove_dir_all — matching VS
+# Code's own default delete behavior (recoverable) rather than a silent,
+# irreversible one for what's a single misclick away in a UI.
+trash = "5"
 
 [target.'cfg(windows)'.dependencies]
 # Raw WebView2 settings access (disabling the default context menu) —

@@ -19,6 +19,7 @@ use std::process::Command;
 
 use base64::Engine as _;
 use serde::Serialize;
+use tauri_plugin_opener::OpenerExt;
 
 /// Directory names never shown in the tree, regardless of workspace — `.git`
 /// is never useful to browse here, and `node_modules`/`target` are the two
@@ -552,6 +553,155 @@ pub fn save_file(root: &Path, rel_path: &str, content: &str) -> Result<(), Strin
     })
 }
 
+// ── file/folder operations (tree context menu) ──────────────────────────
+//
+// Unlike every rel_path above (which only ever originates from this panel's
+// own tree listing — see resolve_within_root's doc comment), the *names*
+// here come straight from a text input the user typed (New File/Folder's
+// name, Rename's new name) — validate_entry_name is this section's own,
+// stricter gate for that, checked before any of these ever touch disk.
+// resolve_within_root itself is still what validates every *existing* path
+// (a parent to create inside, an entry to rename/move/delete) stays inside
+// the workspace, same as save_file above.
+
+/// A single path segment, never something that could traverse elsewhere —
+/// rejects anything empty, `.`/`..`, containing a path separator, or (on
+/// Windows) one of the characters NTFS itself won't allow in a name.
+fn validate_entry_name(name: &str) -> Result<(), String> {
+    let lang = crate::i18n::detect();
+    let windows_reserved = |c: char| "<>:\"/\\|?*".contains(c) || (c as u32) < 0x20;
+    let invalid = name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('\\')
+        || name.chars().any(windows_reserved);
+    if invalid {
+        return Err(crate::i18n::tr(lang, "文件名无效", "Invalid file name").to_string());
+    }
+    Ok(())
+}
+
+fn err_already_exists() -> String {
+    let lang = crate::i18n::detect();
+    crate::i18n::tr(lang, "已存在同名文件或文件夹", "A file or folder with this name already exists").to_string()
+}
+
+/// `parent_rel_path`: workspace-relative, from the tree (`""` for the
+/// workspace root itself — `root.join("")` is `root` unchanged, so that
+/// resolves correctly too). `name`: user-typed, the new file's own name
+/// (not a path).
+pub fn create_file(root: &Path, parent_rel_path: &str, name: &str) -> Result<(), String> {
+    let lang = crate::i18n::detect();
+    validate_entry_name(name)?;
+    let parent = resolve_within_root(root, parent_rel_path)?;
+    let target = parent.join(name);
+    if target.exists() {
+        return Err(err_already_exists());
+    }
+    fs::write(&target, "").map_err(|e| {
+        if lang == crate::i18n::Lang::En {
+            format!("Failed to create file: {e}")
+        } else {
+            format!("创建文件失败: {e}")
+        }
+    })
+}
+
+pub fn create_dir(root: &Path, parent_rel_path: &str, name: &str) -> Result<(), String> {
+    let lang = crate::i18n::detect();
+    validate_entry_name(name)?;
+    let parent = resolve_within_root(root, parent_rel_path)?;
+    let target = parent.join(name);
+    if target.exists() {
+        return Err(err_already_exists());
+    }
+    fs::create_dir(&target).map_err(|e| {
+        if lang == crate::i18n::Lang::En {
+            format!("Failed to create folder: {e}")
+        } else {
+            format!("创建文件夹失败: {e}")
+        }
+    })
+}
+
+/// `rel_path`: the entry being renamed, from the tree. `new_name`:
+/// user-typed — just the new name, not a path, so this can't be used to
+/// move an entry into a different directory (see move_entry for that).
+pub fn rename_entry(root: &Path, rel_path: &str, new_name: &str) -> Result<(), String> {
+    let lang = crate::i18n::detect();
+    validate_entry_name(new_name)?;
+    let source = resolve_within_root(root, rel_path)?;
+    let parent = source.parent().ok_or_else(|| crate::i18n::tr(lang, "无法重命名工作区根目录", "Cannot rename the workspace root").to_string())?;
+    let target = parent.join(new_name);
+    if target.exists() {
+        return Err(err_already_exists());
+    }
+    fs::rename(&source, &target).map_err(|e| {
+        if lang == crate::i18n::Lang::En {
+            format!("Rename failed: {e}")
+        } else {
+            format!("重命名失败: {e}")
+        }
+    })
+}
+
+/// Drag-and-drop move: `from_rel_path` (the dragged entry) into
+/// `to_parent_rel_path` (the folder dropped onto, `""` for the workspace
+/// root), keeping the same base name — both sides are tree-derived paths,
+/// not user-typed, so this doesn't go through validate_entry_name at all.
+pub fn move_entry(root: &Path, from_rel_path: &str, to_parent_rel_path: &str) -> Result<(), String> {
+    let lang = crate::i18n::detect();
+    let source = resolve_within_root(root, from_rel_path)?;
+    let target_parent = resolve_within_root(root, to_parent_rel_path)?;
+    let name = source
+        .file_name()
+        .ok_or_else(|| crate::i18n::tr(lang, "无法移动工作区根目录", "Cannot move the workspace root").to_string())?;
+    // fs::rename onto a directory's own descendant is nonsensical (and
+    // platform-inconsistent about how it fails) — caught explicitly here
+    // for a clear message instead of surfacing whatever raw OS error that
+    // produces. starts_with also covers "dropped onto itself" (source ==
+    // target_parent is a prefix of itself).
+    if target_parent.starts_with(&source) {
+        return Err(crate::i18n::tr(lang, "不能将文件夹移动到自身或其子目录中", "Cannot move a folder into itself or one of its own subfolders").to_string());
+    }
+    let target = target_parent.join(name);
+    if target.exists() {
+        return Err(err_already_exists());
+    }
+    fs::rename(&source, &target).map_err(|e| {
+        if lang == crate::i18n::Lang::En {
+            format!("Move failed: {e}")
+        } else {
+            format!("移动失败: {e}")
+        }
+    })
+}
+
+/// To the OS recycle bin/trash, not a permanent fs::remove_* — see this
+/// section's own module comment and the `trash` dependency's doc comment in
+/// Cargo.toml for why. Works for both files and directories.
+pub fn delete_entry(root: &Path, rel_path: &str) -> Result<(), String> {
+    let lang = crate::i18n::detect();
+    let target = resolve_within_root(root, rel_path)?;
+    trash::delete(&target).map_err(|e| {
+        if lang == crate::i18n::Lang::En {
+            format!("Delete failed: {e}")
+        } else {
+            format!("删除失败: {e}")
+        }
+    })
+}
+
+/// Opens the OS's own file manager with `rel_path` selected — the same
+/// `reveal_item_in_dir` the app menu's "打开数据目录"/open_data_dir already
+/// uses in lib.rs, just pointed at a workspace entry instead of the dsh
+/// home directory.
+pub fn reveal_in_file_manager(app: &tauri::AppHandle, root: &Path, rel_path: &str) -> Result<(), String> {
+    let target = resolve_within_root(root, rel_path)?;
+    app.opener().reveal_item_in_dir(&target).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -961,5 +1111,138 @@ mod tests {
         let result = save_file(&dir, "does-not-exist.txt", "content");
         assert!(result.is_err());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ── file/folder operations ────────────────────────────────────────────
+
+    #[test]
+    fn create_file_creates_an_empty_file_at_the_workspace_root() {
+        let dir = scratch_dir("create-file-root");
+        let result = create_file(&dir, "", "new.txt");
+        assert!(result.is_ok());
+        assert_eq!(fs::read_to_string(dir.join("new.txt")).unwrap(), "");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_file_creates_inside_an_existing_subfolder() {
+        let dir = scratch_dir("create-file-nested");
+        fs::create_dir_all(dir.join("src")).unwrap();
+        let result = create_file(&dir, "src", "main.rs");
+        assert!(result.is_ok());
+        assert!(dir.join("src").join("main.rs").is_file());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_file_rejects_a_name_that_already_exists() {
+        let dir = scratch_dir("create-file-exists");
+        fs::write(dir.join("a.txt"), "original").unwrap();
+        let result = create_file(&dir, "", "a.txt");
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(dir.join("a.txt")).unwrap(), "original");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_file_rejects_a_name_containing_a_path_separator() {
+        // The one check that matters most here: without it, a "new file
+        // name" of "../escape.txt" would let create_file write outside
+        // whatever parent_rel_path resolved to.
+        let dir = scratch_dir("create-file-traversal");
+        let result = create_file(&dir, "", "../escape.txt");
+        assert!(result.is_err());
+        assert!(!dir.parent().unwrap().join("escape.txt").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_dir_creates_a_directory() {
+        let dir = scratch_dir("create-dir");
+        let result = create_dir(&dir, "", "newfolder");
+        assert!(result.is_ok());
+        assert!(dir.join("newfolder").is_dir());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rename_entry_renames_within_the_same_parent() {
+        let dir = scratch_dir("rename-basic");
+        fs::write(dir.join("old.txt"), "content").unwrap();
+        let result = rename_entry(&dir, "old.txt", "new.txt");
+        assert!(result.is_ok());
+        assert!(!dir.join("old.txt").exists());
+        assert_eq!(fs::read_to_string(dir.join("new.txt")).unwrap(), "content");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rename_entry_rejects_a_new_name_that_already_exists() {
+        let dir = scratch_dir("rename-collision");
+        fs::write(dir.join("a.txt"), "a").unwrap();
+        fs::write(dir.join("b.txt"), "b").unwrap();
+        let result = rename_entry(&dir, "a.txt", "b.txt");
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(dir.join("b.txt")).unwrap(), "b");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn move_entry_moves_into_a_different_parent() {
+        let dir = scratch_dir("move-basic");
+        fs::create_dir_all(dir.join("dest")).unwrap();
+        fs::write(dir.join("file.txt"), "content").unwrap();
+        let result = move_entry(&dir, "file.txt", "dest");
+        assert!(result.is_ok());
+        assert!(!dir.join("file.txt").exists());
+        assert_eq!(fs::read_to_string(dir.join("dest").join("file.txt")).unwrap(), "content");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn move_entry_rejects_moving_a_folder_into_its_own_subfolder() {
+        let dir = scratch_dir("move-into-descendant");
+        fs::create_dir_all(dir.join("parent").join("child")).unwrap();
+        let result = move_entry(&dir, "parent", "parent/child");
+        assert!(result.is_err());
+        assert!(dir.join("parent").join("child").is_dir());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn move_entry_rejects_a_target_name_that_already_exists() {
+        let dir = scratch_dir("move-collision");
+        fs::create_dir_all(dir.join("dest")).unwrap();
+        fs::write(dir.join("dest").join("file.txt"), "existing").unwrap();
+        fs::write(dir.join("file.txt"), "incoming").unwrap();
+        let result = move_entry(&dir, "file.txt", "dest");
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(dir.join("dest").join("file.txt")).unwrap(), "existing");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn delete_entry_removes_the_file_from_its_original_location() {
+        let dir = scratch_dir("delete-file");
+        fs::write(dir.join("gone.txt"), "content").unwrap();
+        let result = delete_entry(&dir, "gone.txt");
+        assert!(result.is_ok(), "{result:?}");
+        assert!(!dir.join("gone.txt").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn delete_entry_rejects_a_path_that_escapes_root() {
+        let dir = scratch_dir("delete-escape");
+        let outside = scratch_dir("delete-escape-outside-target");
+        fs::write(outside.join("secret.txt"), "should not be touched").unwrap();
+        let escaping_rel_path = format!("../{}/secret.txt", outside.file_name().unwrap().to_string_lossy());
+
+        let result = delete_entry(&dir, &escaping_rel_path);
+        assert!(result.is_err());
+        assert!(outside.join("secret.txt").exists());
+
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&outside);
     }
 }

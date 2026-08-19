@@ -171,6 +171,58 @@ fn save_file_content(
     panel::save_file(&root, &path, &content)
 }
 
+// ── tree context menu: file/folder operations ────────────────────────────
+// Same override_path resolution as every command above — the manual
+// workspace picker's choice when there is one, auto-inference otherwise.
+
+#[tauri::command]
+fn create_file(app: AppHandle, state: State<'_, AppState>, parent_path: String, name: String, override_path: Option<String>) -> Result<(), String> {
+    let root = override_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| panel::effective_workspace_dir(&app, &state.server));
+    panel::create_file(&root, &parent_path, &name)
+}
+
+#[tauri::command]
+fn create_dir(app: AppHandle, state: State<'_, AppState>, parent_path: String, name: String, override_path: Option<String>) -> Result<(), String> {
+    let root = override_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| panel::effective_workspace_dir(&app, &state.server));
+    panel::create_dir(&root, &parent_path, &name)
+}
+
+#[tauri::command]
+fn rename_entry(app: AppHandle, state: State<'_, AppState>, path: String, new_name: String, override_path: Option<String>) -> Result<(), String> {
+    let root = override_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| panel::effective_workspace_dir(&app, &state.server));
+    panel::rename_entry(&root, &path, &new_name)
+}
+
+#[tauri::command]
+fn move_entry(app: AppHandle, state: State<'_, AppState>, path: String, to_parent_path: String, override_path: Option<String>) -> Result<(), String> {
+    let root = override_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| panel::effective_workspace_dir(&app, &state.server));
+    panel::move_entry(&root, &path, &to_parent_path)
+}
+
+#[tauri::command]
+fn delete_entry(app: AppHandle, state: State<'_, AppState>, path: String, override_path: Option<String>) -> Result<(), String> {
+    let root = override_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| panel::effective_workspace_dir(&app, &state.server));
+    panel::delete_entry(&root, &path)
+}
+
+#[tauri::command]
+fn reveal_in_file_manager(app: AppHandle, state: State<'_, AppState>, path: String, override_path: Option<String>) -> Result<(), String> {
+    let root = override_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| panel::effective_workspace_dir(&app, &state.server));
+    panel::reveal_in_file_manager(&app, &root, &path)
+}
+
 #[tauri::command]
 fn get_log_tail(state: State<'_, AppState>, n: Option<usize>) -> Vec<String> {
     server::log_tail(&state.server, n.unwrap_or(100))
@@ -825,6 +877,12 @@ pub fn run() {
             get_known_workspaces,
             get_editable_preview,
             save_file_content,
+            create_file,
+            create_dir,
+            rename_entry,
+            move_entry,
+            delete_entry,
+            reveal_in_file_manager,
             terminal::terminal_spawn,
             terminal::terminal_write,
             terminal::terminal_resize,
