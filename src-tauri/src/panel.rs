@@ -68,7 +68,19 @@ fn read_dir_entries(root: &Path, dir: &Path, depth: usize, budget: &mut usize) -
         b_is_dir.cmp(&a_is_dir).then_with(|| a.file_name().cmp(&b.file_name()))
     });
 
+    // Two passes, not one: every entry directly inside `dir` is listed first
+    // (cheap, one budget unit each) before any recursion into a
+    // subdirectory begins. A single loop that recurses immediately on each
+    // directory hit — the previous shape here — lets one early, huge
+    // subtree (a build-output folder not caught by IGNORED_DIR_NAMES, say)
+    // exhaust the *entire shared budget* depth-first before its own later
+    // siblings in `dir` are even listed, let alone recursed into. Reported
+    // symptom: a workspace root with a large early subdirectory only showed
+    // a handful of its other root-level folders — this was why. With this
+    // split, a large subtree can now only ever starve *its own*
+    // descendants, never entries a sibling call would otherwise show.
     let mut out = Vec::new();
+    let mut subdirs: Vec<(usize, PathBuf)> = Vec::new();
     for entry in entries {
         if *budget == 0 {
             break;
@@ -84,8 +96,21 @@ fn read_dir_entries(root: &Path, dir: &Path, depth: usize, budget: &mut usize) -
         let path = rel.to_string_lossy().replace('\\', "/");
         *budget -= 1;
 
-        let children = is_dir.then(|| read_dir_entries(root, &full_path, depth + 1, budget));
-        out.push(TreeEntry { name, path, is_dir, children });
+        if is_dir {
+            subdirs.push((out.len(), full_path));
+        }
+        // Directories default to an empty (not absent) children list, same
+        // as read_dir_entries() returning early would've produced before —
+        // a directory whose own turn never comes in the loop below (budget
+        // ran out among its siblings) still renders as an expandable, if
+        // empty-looking, folder rather than silently looking like a leaf.
+        out.push(TreeEntry { name, path, is_dir, children: is_dir.then(Vec::new) });
+    }
+    for (index, full_path) in subdirs {
+        if *budget == 0 {
+            break;
+        }
+        out[index].children = Some(read_dir_entries(root, &full_path, depth + 1, budget));
     }
     out
 }
@@ -701,6 +726,33 @@ mod tests {
         assert_eq!(names, vec!["src", "a.txt"]);
         assert_eq!(tree[0].path, "src");
         assert_eq!(tree[0].children.as_ref().unwrap()[0].path, "src/main.rs");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tree_lists_every_root_entry_even_when_an_earlier_ones_subtree_exhausts_the_budget() {
+        // Regression test for a reported bug: a large/deep subtree under an
+        // alphabetically-earlier root entry used to consume the *entire*
+        // shared budget depth-first before its own root-level siblings were
+        // even listed — not just before their children were fetched, they
+        // never got a TreeEntry at all. Calls read_dir_entries directly with
+        // a tiny budget instead of creating thousands of files to exhaust
+        // the real MAX_ENTRIES.
+        let dir = scratch_dir("tree-budget");
+        fs::create_dir_all(dir.join("aaa")).unwrap();
+        for i in 1..=5 {
+            fs::write(dir.join("aaa").join(format!("f{i}.txt")), "").unwrap();
+        }
+        fs::create_dir_all(dir.join("bbb")).unwrap();
+        fs::write(dir.join("bbb").join("g.txt"), "").unwrap();
+
+        let mut budget = 3;
+        let tree = read_dir_entries(&dir, &dir, 0, &mut budget);
+        let names: Vec<_> = tree.iter().map(|e| e.name.as_str()).collect();
+
+        assert_eq!(names, vec!["aaa", "bbb"], "bbb must still be listed even though aaa's subtree used up the rest of the budget");
+        assert!(!tree[0].children.as_ref().unwrap().is_empty(), "aaa should still get whatever budget remained after both root entries were listed");
 
         let _ = fs::remove_dir_all(&dir);
     }
