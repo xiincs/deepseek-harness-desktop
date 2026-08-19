@@ -471,6 +471,26 @@
       </div>
     </div>
     <!--
+      Non-blocking stand-in for window.confirm()/alert(), used by the file
+      editor (discard changes / revert / save failed — see app.js). Those
+      native dialogs block the whole WebView2 process (nothing else can
+      repaint) and render unstyled, outside this app's theme. One overlay
+      + card shared by both shapes: showConfirmDialog() shows the cancel
+      button, showAlertDialog() hides it and is just an acknowledgement.
+      A direct child of <body>, sibling to #plugin-market-overlay, for the
+      same reason that one is — it must float above the dock/toolbar/
+      harness regardless of what's open underneath it.
+    -->
+    <div id="confirm-dialog-overlay" class="hidden">
+      <div id="confirm-dialog" role="alertdialog" aria-modal="true" aria-describedby="confirm-dialog-message">
+        <p id="confirm-dialog-message"></p>
+        <div id="confirm-dialog-actions" class="actions">
+          <button id="btn-confirm-dialog-cancel" data-i18n="cancel">取消</button>
+          <button id="btn-confirm-dialog-ok" class="primary"></button>
+        </div>
+      </div>
+    </div>
+    <!--
       A real code editor (CodeMirror 6), not a highlighter + textarea +
       hand-rolled diff view: opening a file goes straight to an editable
       pane, with git changes shown as inline decorations via

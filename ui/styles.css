@@ -984,6 +984,60 @@ body.platform-decorated #toolbar-actions {
   min-height: 0;
 }
 
+/* ── confirm dialog: non-blocking window.confirm()/alert() replacement ──
+   Same overlay+card language as #plugin-market-overlay (dim backdrop,
+   var(--card)/--card-border/--card-shadow), just message-box sized instead
+   of browse-UI sized, and stacked above it (z-index) so it can gate an
+   "are you sure" moment regardless of whatever else is open. */
+#confirm-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+#confirm-dialog-overlay.hidden {
+  display: none;
+}
+
+#confirm-dialog {
+  width: min(360px, 100%);
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+  padding: 20px;
+  animation: boot-card-enter 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+#confirm-dialog-message {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+#confirm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Discard/revert are both "throw away work" actions — var(--danger) reads
+   as the same "review before you proceed" signal .plugin-confirm-warning
+   already uses elsewhere, not a new color introduced just for this. */
+#btn-confirm-dialog-ok.danger {
+  background: var(--danger);
+}
+
+#btn-confirm-dialog-ok.danger:hover {
+  opacity: 0.85;
+}
+
 /* ── resize handle: draggable, persisted dock-vs-content split ── */
 
 /* A real 8px-wide flex item (not a thin line widened via a negative-margin

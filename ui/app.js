@@ -84,6 +84,10 @@ const els = {
   btnPreviewClose: document.getElementById("btn-preview-close"),
   btnPreviewSave: document.getElementById("btn-preview-save"),
   btnPreviewRevert: document.getElementById("btn-preview-revert"),
+  confirmDialogOverlay: document.getElementById("confirm-dialog-overlay"),
+  confirmDialogMessage: document.getElementById("confirm-dialog-message"),
+  btnConfirmDialogCancel: document.getElementById("btn-confirm-dialog-cancel"),
+  btnConfirmDialogOk: document.getElementById("btn-confirm-dialog-ok"),
 };
 
 // ── i18n ─────────────────────────────────────────────────────────────────
@@ -140,6 +144,8 @@ const STRINGS = {
     revertTitle: "放弃改动，还原为已保存内容",
     save: "保存",
     saveTitle: "保存改动 (Ctrl+S)",
+    cancel: "取消",
+    discardChanges: "放弃",
     closePreviewTitle: "关闭预览",
     restartTerminalTitle: "重启终端",
     closeTerminalTitle: "关闭终端",
@@ -238,6 +244,8 @@ const STRINGS = {
     revertTitle: "Discard changes and revert to the last saved version",
     save: "Save",
     saveTitle: "Save changes (Ctrl+S)",
+    cancel: "Cancel",
+    discardChanges: "Discard",
     closePreviewTitle: "Close Preview",
     restartTerminalTitle: "Restart Terminal",
     closeTerminalTitle: "Close Terminal",
@@ -1358,8 +1366,15 @@ function renderTreeNode(entry, gitMap, container) {
 let currentPreviewPath = null;
 let currentEditorView = null;
 // The content as of the last successful load or save — see the baseline
-// note above. `null` whenever no editor is mounted.
+// note above. `null` whenever no editor is mounted. Always \n-only (see
+// normalizeLineEndings below), matching what CodeMirror's own doc.toString()
+// produces regardless of the file's actual line endings on disk.
 let currentSavedContent = null;
+// The working copy's on-disk separator ("\r\n") when it isn't a plain "\n",
+// otherwise null — set on every mount, restored on save (see
+// normalizeLineEndings and saveCurrentEdit). Independent of currentSavedContent
+// staying \n-only: this is the one place that original separator survives.
+let currentLineEnding = null;
 // Built once, lazily, and reused by every editor instance — colors are
 // resolved via var(...) at paint time, so they already stay correct across
 // a live prefers-color-scheme change without rebuilding this.
@@ -1444,16 +1459,27 @@ function languageExtensionForPath(path) {
   }
 }
 
-// CodeMirror's default line splitting treats \r\n, \r, and \n alike but
-// always rejoins with plain \n on toString() — silently dropping every \r
-// the instant a CRLF file is mounted, with zero user edits. Left alone,
-// that makes isDirty() below (a plain string compare) see every CRLF file
-// as dirty right after opening it, popping the discard-changes confirm on
-// switching/closing it with nothing actually changed. Telling CodeMirror
-// the document's real separator up front (see mountEditor) makes
-// toString() rejoin with it too, so an unedited doc round-trips losslessly.
-function lineSeparatorExtension(CM, text) {
-  return text.includes("\r\n") ? CM.EditorState.lineSeparator.of("\r\n") : [];
+// CodeMirror's Text model always splits AND rejoins on plain \n internally
+// — confirmed empirically, not just from docs: even with
+// EditorState.lineSeparator.of("\r\n") set (an earlier version of this fix),
+// state.doc.toString() still came back \n-only. That facet only changes
+// what a future keystroke like Enter inserts; it can't retroactively change
+// how the `doc` string was split when the state was built, which happens
+// before any facet from `extensions` is resolved. So a CRLF file's \r bytes
+// are gone the instant it's mounted no matter what — left unhandled, that
+// made isDirty() (a plain string compare) see every CRLF file as dirty
+// right after opening it, popping the discard-changes confirm on switching/
+// closing it with nothing actually changed.
+//
+// The only way to keep CodeMirror internally consistent is converting
+// explicitly outside of it: every string that goes into a doc or gets
+// compared against one (mountEditor, refreshCurrentPreview) is normalized
+// to \n first, so everything downstream of "mounted" is uniformly \n and
+// round-trips losslessly. currentLineEnding records what to convert back to
+// on save (saveCurrentEdit), so a CRLF file on disk is still a CRLF file on
+// disk afterward, not silently rewritten to LF.
+function normalizeLineEndings(text) {
+  return text.replace(/\r\n/g, "\n");
 }
 
 function isDirty() {
@@ -1466,14 +1492,63 @@ function setDirty(dirty) {
   els.btnPreviewRevert.classList.toggle("hidden", !dirty);
 }
 
+// ── non-blocking confirm/alert dialog ───────────────────────────────────
+//
+// Stand-in for window.confirm()/alert(): those block the entire WebView2
+// process (nothing else repaints or responds while one is open) and render
+// as an unstyled native OS dialog outside this app's theme. One singleton
+// overlay+card (markup in index.html) shared by both shapes —
+// showConfirmDialog() shows a cancel button and resolves to whichever the
+// user picked, showAlertDialog() hides cancel and is just an
+// acknowledgement (always resolves true) — driven by a Promise so call
+// sites read the same as the window.confirm() they replace, just awaited.
+let dialogSettle = null;
+
+function closeDialog(result) {
+  if (!dialogSettle) return;
+  els.confirmDialogOverlay.classList.add("hidden");
+  const settle = dialogSettle;
+  dialogSettle = null;
+  settle(result);
+}
+
+// Every call site here is a single await-ed gate before its next action, so
+// in practice a second call never arrives before the first resolves — but
+// resolve any still-open dialog first regardless, so a stray leftover
+// listener can never settle two different Promises out from under this one
+// `dialogSettle` slot.
+function openDialog({ message, confirmLabel, showCancel, danger }) {
+  if (dialogSettle) closeDialog(false);
+  els.confirmDialogMessage.textContent = message;
+  els.btnConfirmDialogOk.textContent = confirmLabel;
+  els.btnConfirmDialogOk.classList.toggle("danger", !!danger);
+  els.btnConfirmDialogCancel.classList.toggle("hidden", !showCancel);
+  els.confirmDialogOverlay.classList.remove("hidden");
+  // Defaults focus to Cancel (not OK) when there is one: every current use
+  // of showCancel is a destructive "throw away work" action, so an
+  // accidental Enter keypress should land on the safe choice.
+  (showCancel ? els.btnConfirmDialogCancel : els.btnConfirmDialogOk).focus();
+  return new Promise((resolve) => {
+    dialogSettle = resolve;
+  });
+}
+
+function showConfirmDialog(message, confirmLabel, danger = false) {
+  return openDialog({ message, confirmLabel, showCancel: true, danger });
+}
+
+function showAlertDialog(message) {
+  return openDialog({ message, confirmLabel: t("gotIt"), showCancel: false });
+}
+
 // True if it's safe to proceed with whatever's about to replace or close
 // the current preview: nothing open, nothing unsaved, or the user
 // explicitly confirmed discarding it. Never mutates state itself — the
 // caller that gets `true` back is the one actually tearing down or
 // replacing the editor.
-function confirmDiscardIfNeeded() {
+async function confirmDiscardIfNeeded() {
   if (!isDirty()) return true;
-  return confirm(t("confirmDiscardChanges"));
+  return showConfirmDialog(t("confirmDiscardChanges"), t("discardChanges"), true);
 }
 
 function destroyEditor() {
@@ -1482,6 +1557,7 @@ function destroyEditor() {
     currentEditorView = null;
   }
   currentSavedContent = null;
+  currentLineEnding = null;
   setDirty(false);
 }
 
@@ -1504,16 +1580,17 @@ function mountEditor(path, preview) {
       els.panelPreviewBody.textContent = t("cannotReadHistoricalContent");
       return;
     }
-    const extensions = [
-      CM.basicSetup,
-      ...buildCodeMirrorBaseExtensions(),
-      CM.EditorState.readOnly.of(true),
-      lineSeparatorExtension(CM, originalText),
-    ];
+    // Read-only, so currentLineEnding is moot (nothing to save back) — set
+    // anyway for consistency, and because isDirty() still runs against this
+    // view (see confirmDiscardIfNeeded's callers) and needs its usual \n-only
+    // currentSavedContent to compare correctly.
+    currentLineEnding = originalText.includes("\r\n") ? "\r\n" : null;
+    const normalizedOriginal = normalizeLineEndings(originalText);
+    const extensions = [CM.basicSetup, ...buildCodeMirrorBaseExtensions(), CM.EditorState.readOnly.of(true)];
     const lang = languageExtensionForPath(path);
     if (lang) extensions.push(lang);
-    currentEditorView = new CM.EditorView({ doc: originalText, extensions, parent: els.panelPreviewBody });
-    currentSavedContent = originalText;
+    currentEditorView = new CM.EditorView({ doc: normalizedOriginal, extensions, parent: els.panelPreviewBody });
+    currentSavedContent = normalizedOriginal;
     return;
   }
 
@@ -1532,11 +1609,12 @@ function mountEditor(path, preview) {
   }
 
   const originalText = contentTextOrNull(preview.original);
+  currentLineEnding = current.content.includes("\r\n") ? "\r\n" : null;
+  const normalizedCurrent = normalizeLineEndings(current.content);
   const lang = languageExtensionForPath(path);
   const extensions = [
     CM.basicSetup,
     ...buildCodeMirrorBaseExtensions(),
-    lineSeparatorExtension(CM, current.content),
     CM.keymap.of([
       CM.indentWithTab,
       { key: "Mod-s", preventDefault: true, run: () => (saveCurrentEdit(), true) },
@@ -1548,16 +1626,19 @@ function mountEditor(path, preview) {
   if (lang) extensions.push(lang);
   // gutter markers only, no per-chunk accept/reject buttons — this is an
   // ordinary editable file with an informational "differs from HEAD"
-  // signal, not a merge-conflict resolution UI.
-  if (originalText !== null) extensions.push(CM.unifiedMergeView({ original: originalText, mergeControls: false }));
+  // signal, not a merge-conflict resolution UI. Diffed against the same
+  // \n-normalized form as the doc itself — comparing raw CRLF `original`
+  // text against an internally-\n-only doc would flag every single line as
+  // changed instead of just the lines that actually differ.
+  if (originalText !== null) extensions.push(CM.unifiedMergeView({ original: normalizeLineEndings(originalText), mergeControls: false }));
 
-  currentEditorView = new CM.EditorView({ doc: current.content, extensions, parent: els.panelPreviewBody });
-  currentSavedContent = current.content;
+  currentEditorView = new CM.EditorView({ doc: normalizedCurrent, extensions, parent: els.panelPreviewBody });
+  currentSavedContent = normalizedCurrent;
   setDirty(false);
 }
 
 async function showPreview(path) {
-  if (!confirmDiscardIfNeeded()) return;
+  if (!(await confirmDiscardIfNeeded())) return;
   currentPreviewPath = path;
   els.cardFile.classList.remove("hidden");
   syncCardResizeHandleVisibility();
@@ -1603,16 +1684,23 @@ async function refreshCurrentPreview() {
     // position 0 right as the user clicked in to place it, before typing
     // anything (isDirty() alone doesn't catch that moment — content is
     // still identical to currentSavedContent until the first keystroke).
+    // Normalized before comparing — currentSavedContent always is too (see
+    // normalizeLineEndings), so a CRLF file would otherwise never match here
+    // and remount (with the cursor-reset side effect above) on every tick.
     const freshText = contentTextOrNull(preview.current);
-    if (freshText !== null && freshText === currentSavedContent) return;
+    if (freshText !== null && normalizeLineEndings(freshText) === currentSavedContent) return;
     mountEditor(path, preview);
   } catch {
     /* leave whatever's already showing rather than blanking it over a transient poll failure */
   }
 }
 
-function closePreview() {
-  if (!confirmDiscardIfNeeded()) return;
+// The actual teardown, without the confirm gate — for callers that already
+// ran confirmDiscardIfNeeded() themselves against the same dirty state a
+// moment earlier (see the workspace picker's change handler below), where
+// calling the checked closePreview() would ask the user to confirm the same
+// discard a second time.
+function closePreviewUnchecked() {
   currentPreviewPath = null;
   destroyEditor();
   els.cardFile.classList.add("hidden");
@@ -1620,9 +1708,14 @@ function closePreview() {
   syncCardResizeHandleVisibility();
 }
 
-function revertCurrentEdit() {
+async function closePreview() {
+  if (!(await confirmDiscardIfNeeded())) return;
+  closePreviewUnchecked();
+}
+
+async function revertCurrentEdit() {
   if (!currentEditorView || currentSavedContent === null) return;
-  if (!confirm(t("confirmRevert"))) return;
+  if (!(await showConfirmDialog(t("confirmRevert"), t("revert"), true))) return;
   currentEditorView.dispatch({
     changes: { from: 0, to: currentEditorView.state.doc.length, insert: currentSavedContent },
   });
@@ -1633,9 +1726,14 @@ async function saveCurrentEdit() {
   if (!currentEditorView || currentPreviewPath === null) return;
   const path = currentPreviewPath;
   const content = currentEditorView.state.doc.toString();
+  // Restores the file's actual on-disk separator — content is always \n-only
+  // in here (see normalizeLineEndings) regardless of what the file used, so
+  // without this a CRLF file would silently get rewritten to LF on its very
+  // first save through this editor.
+  const diskContent = currentLineEnding === "\r\n" ? content.replace(/\n/g, "\r\n") : content;
   els.btnPreviewSave.disabled = true;
   try {
-    await invoke("save_file_content", { path, content, overridePath: lockedWorkspace });
+    await invoke("save_file_content", { path, content: diskContent, overridePath: lockedWorkspace });
     currentSavedContent = content;
     setDirty(false);
     // The tree's git-status coloring should reflect a just-saved change
@@ -1648,7 +1746,7 @@ async function saveCurrentEdit() {
   } catch (err) {
     // Left exactly as the user typed it on failure — nothing is discarded
     // on a failed write.
-    alert(t("saveFailed", err));
+    await showAlertDialog(t("saveFailed", err));
   } finally {
     els.btnPreviewSave.disabled = false;
   }
@@ -1999,9 +2097,9 @@ async function init() {
     syncCardResizeHandleVisibility();
   });
   els.btnPanelRefresh.addEventListener("click", refreshPanel);
-  els.panelWorkspaceSelect.addEventListener("change", () => {
+  els.panelWorkspaceSelect.addEventListener("change", async () => {
     const value = els.panelWorkspaceSelect.value;
-    if (!confirmDiscardIfNeeded()) {
+    if (!(await confirmDiscardIfNeeded())) {
       // The <select>'s own DOM value already changed on click, ahead of
       // this handler — revert it to match the choice actually still in
       // effect, or the control would show a selection the app never adopted.
@@ -2017,12 +2115,25 @@ async function init() {
     // An open preview's path is relative to whichever workspace was active
     // when it was opened — re-resolving it against the new one could silently
     // show an unrelated (or nonexistent) file of the same relative path.
-    closePreview();
+    // closePreviewUnchecked(), not closePreview(): the confirmDiscardIfNeeded()
+    // gate above already covers this same dirty state, so re-checking it here
+    // too would ask the user to confirm the same discard a second time.
+    closePreviewUnchecked();
     refreshPanel();
   });
   els.btnPreviewClose.addEventListener("click", closePreview);
   els.btnPreviewSave.addEventListener("click", saveCurrentEdit);
   els.btnPreviewRevert.addEventListener("click", revertCurrentEdit);
+  els.btnConfirmDialogOk.addEventListener("click", () => closeDialog(true));
+  els.btnConfirmDialogCancel.addEventListener("click", () => closeDialog(false));
+  els.confirmDialogOverlay.addEventListener("click", (e) => {
+    if (e.target === els.confirmDialogOverlay) closeDialog(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !els.confirmDialogOverlay.classList.contains("hidden")) {
+      closeDialog(false);
+    }
+  });
 
   els.btnUpdateDismiss.addEventListener("click", () => {
     els.updateBanner.classList.add("hidden");
