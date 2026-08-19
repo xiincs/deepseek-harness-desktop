@@ -1592,6 +1592,31 @@ function iconEl(name, cls) {
   return wrap.firstElementChild;
 }
 
+// Briefly swaps a refresh button's icon to a checkmark to confirm the click
+// actually did something — refreshPanel()/refreshDiffView() read local
+// disk/git state, not a network call, so they're usually fast enough that a
+// click otherwise has no visible sign it did anything at all. Purely
+// cosmetic: fires once the refresh call resolves, regardless of whether it
+// hit an internal error (those already render as very visible text
+// replacing the whole panel's content, so a checkmark alongside that isn't
+// hiding anything). Keyed by button element so a rapid second click on the
+// same button restarts its own revert timer instead of two overlapping
+// ones racing to reset the icon.
+const refreshFlashTimers = new Map();
+function flashRefreshSuccess(button) {
+  const icon = button.querySelector("use");
+  if (!icon) return;
+  clearTimeout(refreshFlashTimers.get(button));
+  icon.setAttribute("href", "#icon-check");
+  button.classList.add("refresh-flash");
+  const timer = setTimeout(() => {
+    icon.setAttribute("href", "#icon-refresh");
+    button.classList.remove("refresh-flash");
+    refreshFlashTimers.delete(button);
+  }, 900);
+  refreshFlashTimers.set(button, timer);
+}
+
 // "" is the sentinel for "auto-follow" in the <select> — never a real
 // filesystem path, so it can't collide with an actual workspace's value.
 const AUTO_OPTION_VALUE = "";
@@ -2486,8 +2511,14 @@ async function init() {
     applyCardFileHeight();
     syncCardResizeHandleVisibility();
   });
-  els.btnPanelRefresh.addEventListener("click", refreshPanel);
-  els.btnDiffRefresh.addEventListener("click", refreshDiffView);
+  els.btnPanelRefresh.addEventListener("click", async () => {
+    await refreshPanel();
+    flashRefreshSuccess(els.btnPanelRefresh);
+  });
+  els.btnDiffRefresh.addEventListener("click", async () => {
+    await refreshDiffView();
+    flashRefreshSuccess(els.btnDiffRefresh);
+  });
   els.panelWorkspaceSelect.addEventListener("change", async () => {
     const value = els.panelWorkspaceSelect.value;
     if (!(await confirmDiscardIfNeeded())) {

@@ -1026,6 +1026,14 @@ body.platform-decorated #toolbar-actions {
   background: var(--btn-hover-bg);
 }
 
+/* Refresh-success confirmation (see flashRefreshSuccess in app.js) — just a
+   color swap on the already-swapped-in checkmark icon, no motion/popup, so
+   it reads as a quiet confirmation rather than a notification demanding
+   attention. */
+.dock-card-actions button.refresh-flash {
+  color: var(--success-text);
+}
+
 /* Positions .select-chevron over the native <select> below — kept as a real
    <select> (not a hand-rolled listbox) for its free keyboard/a11y behavior,
    just with its own OS-drawn arrow hidden and swapped for one from the
