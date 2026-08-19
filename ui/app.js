@@ -2441,7 +2441,7 @@ function markdownPreviewStyle() {
     pre { background: ${v("--sidebar-bg")}; padding: 10px 12px; border-radius: 8px; overflow: auto; }
     pre code { background: none; padding: 0; }
     blockquote { border-left: 3px solid ${v("--card-border")}; margin-left: 0; padding: 0.2em 1em; color: ${v("--muted")}; }
-    table { border-collapse: collapse; }
+    table { display: block; overflow-x: auto; border-collapse: collapse; }
     th, td { border: 1px solid ${v("--card-border")}; padding: 5px 10px; }
     img { max-width: 100%; }
     hr { border: none; border-top: 1px solid ${v("--card-border")}; }
