@@ -1753,6 +1753,13 @@ function renderTreeNode(entry, gitMap, container) {
   row.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     e.stopPropagation();
+    // Deliberately not awaited (the menu should open immediately, not wait
+    // on the file load) and deliberately not a toggle like the left-click
+    // handler above — right-clicking an already-previewed file should just
+    // leave it as-is, not close it.
+    if (!entry.isDir && currentPreviewPath !== entry.path) {
+      showPreview(entry.path).then(syncTreeSelectionHighlight);
+    }
     openTreeContextMenu(e.clientX, e.clientY, { path: entry.path, isDir: entry.isDir });
   });
 
