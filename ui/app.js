@@ -1756,6 +1756,49 @@ function renderTreeNode(entry, gitMap, container) {
     openTreeContextMenu(e.clientX, e.clientY, { path: entry.path, isDir: entry.isDir });
   });
 
+  // Every row can be dragged (moved elsewhere) and accepts a drop —
+  // #panel-tree's own dragover/drop listeners (wired in init()) cover
+  // dropping onto empty tree space, meaning the workspace root. A file row
+  // isn't itself a container, so it redirects a drop to its own parent
+  // (same folder the file already lives in) rather than either rejecting
+  // the drop outright or — the bug this replaced — silently bubbling up to
+  // #panel-tree's listener and moving into the root regardless of where in
+  // the tree the file actually was.
+  row.draggable = true;
+  row.addEventListener("dragstart", (e) => {
+    draggedTreePath = entry.path;
+    e.dataTransfer.effectAllowed = "move";
+    row.classList.add("tree-row-dragging");
+  });
+  row.addEventListener("dragend", () => {
+    draggedTreePath = null;
+    row.classList.remove("tree-row-dragging");
+  });
+  const dropTargetPath = entry.isDir ? entry.path : dirnameOf(entry.path);
+  // stopPropagation on all three regardless of entry.isDir — otherwise a
+  // drop that lands on any row, file or folder, would also bubble up to
+  // #panel-tree's own drop listener and fire performTreeMove a second
+  // time, with "" (the root) as the target.
+  row.addEventListener("dragover", (e) => {
+    if (draggedTreePath === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    // Only a folder is highlighted as the target — a file's own row
+    // redirecting elsewhere shouldn't visually read as "drop into this
+    // file".
+    if (entry.isDir) row.classList.add("tree-row-drop-target");
+  });
+  row.addEventListener("dragleave", (e) => {
+    e.stopPropagation();
+    row.classList.remove("tree-row-drop-target");
+  });
+  row.addEventListener("drop", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    row.classList.remove("tree-row-drop-target");
+    performTreeMove(draggedTreePath, dropTargetPath);
+  });
+
   if (hasChildren) {
     const childWrap = document.createElement("div");
     childWrap.className = "tree-children";
@@ -1810,11 +1853,37 @@ function syncTreeSelectionHighlight() {
 // that element. `target` is { path, isDir } for a right-clicked row, or
 // null for empty tree space (meaning "the workspace root").
 
+function dirnameOf(relPath) {
+  const idx = relPath.lastIndexOf("/");
+  return idx === -1 ? "" : relPath.slice(0, idx);
+}
+
 function parentDirFor(target) {
   if (target === null) return "";
   if (target.isDir) return target.path;
-  const idx = target.path.lastIndexOf("/");
-  return idx === -1 ? "" : target.path.slice(0, idx);
+  return dirnameOf(target.path);
+}
+
+// Set on dragstart, read by whichever row's drop handler fires — dataTransfer
+// itself can't be relied on here: most browsers only expose its actual
+// payload (getData) on the drop event, not during dragover, so this is the
+// one channel available for "what's actually being dragged" the whole time
+// a drag is in progress, including for the dragover highlight below.
+let draggedTreePath = null;
+
+async function performTreeMove(draggedPath, targetParentPath) {
+  if (draggedPath === null) return;
+  // Silent no-op, not a "already exists" error from move_entry — dropped
+  // back onto the folder it's already directly inside of.
+  if (dirnameOf(draggedPath) === targetParentPath) return;
+  try {
+    await invoke("move_entry", { path: draggedPath, toParentPath: targetParentPath, overridePath: lockedWorkspace });
+    if (targetParentPath !== "") expandedDirs.add(targetParentPath);
+    closePreviewIfAffected(draggedPath);
+    await refreshTreeAndGitStatus();
+  } catch (err) {
+    showAlertDialog(t("moveEntryFailed", err));
+  }
 }
 
 // If the entry a rename/move/delete just affected was the open preview (or
@@ -2893,6 +2962,17 @@ async function init() {
   els.panelTree.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     openTreeContextMenu(e.clientX, e.clientY, null);
+  });
+  // Drop-onto-empty-space = drop onto the workspace root — a drop that
+  // instead landed on a folder row never reaches here, its own drop
+  // listener (renderTreeNode) stops propagation first.
+  els.panelTree.addEventListener("dragover", (e) => {
+    if (draggedTreePath === null) return;
+    e.preventDefault();
+  });
+  els.panelTree.addEventListener("drop", (e) => {
+    e.preventDefault();
+    performTreeMove(draggedTreePath, "");
   });
   document.addEventListener("click", (e) => {
     if (isTreeContextMenuOpen() && !els.treeContextMenu.contains(e.target)) closeTreeContextMenu();

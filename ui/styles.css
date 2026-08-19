@@ -1444,6 +1444,23 @@ body.resizing-rows #panel-preview-body {
   color: var(--accent-tint-text);
 }
 
+/* The row currently being dragged (see renderTreeNode's dragstart/dragend
+   in app.js) — same idea as the browser's own default half-opacity drag
+   image, just on the source row itself so it's still visible as "this is
+   what's moving" even where the OS-drawn drag image doesn't cover. */
+.tree-row-dragging {
+  opacity: 0.5;
+}
+
+/* A folder row currently being dragged over with a valid drop in progress —
+   outline instead of just a background swap so it reads clearly even
+   against .tree-row-selected/git-status tinting on the same row. */
+.tree-row-drop-target {
+  background: var(--accent-tint-bg);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .tree-row-selected .tree-label {
   color: inherit;
 }
