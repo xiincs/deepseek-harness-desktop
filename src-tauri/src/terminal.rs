@@ -1,13 +1,18 @@
-//! Backing process for the toolbar terminal button: a single, singleton PTY
-//! shell (not one per some future multi-tab UI — nothing here asks for that
-//! yet). Spawned lazily on first open and kept alive across the dock card
-//! being hidden/shown again, same lifetime as `AppState`'s own server handle.
+//! Backing processes for the toolbar terminal button's tabs: one PTY shell
+//! per open tab, keyed by an id the client hands in (see `ui/app.js`'s
+//! terminalTabs map — this side never generates ids itself, it just uses
+//! whatever the client sends as a HashMap key). Each tab is spawned lazily
+//! when its own tab is created and kept alive across the dock card being
+//! hidden/shown again, same lifetime as `AppState`'s own server handle —
+//! only closing a specific tab, or the app quitting, kills that tab's shell.
 
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::Mutex;
 
 use base64::Engine as _;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::panel;
@@ -20,7 +25,18 @@ struct TerminalSession {
 }
 
 #[derive(Default)]
-pub struct TerminalState(Mutex<Option<TerminalSession>>);
+pub struct TerminalState(Mutex<HashMap<u32, TerminalSession>>);
+
+#[derive(Clone, Serialize)]
+struct TerminalDataEvent {
+    id: u32,
+    data: String,
+}
+
+#[derive(Clone, Serialize)]
+struct TerminalExitEvent {
+    id: u32,
+}
 
 /// The shell the dock terminal runs.
 ///
@@ -58,20 +74,23 @@ fn shell_command() -> CommandBuilder {
 /// Reads PTY output on a background thread for as long as the session
 /// outlives this call, base64-encoding each chunk (raw bytes can split a
 /// multi-byte UTF-8 sequence or contain control bytes a JSON string can't
-/// carry) and forwarding it to the dock card via the `terminal-data` event.
-/// EOF (child exited, pipe closed) fires `terminal-exit` once and returns.
-fn spawn_reader(app: AppHandle, mut reader: Box<dyn Read + Send>) {
+/// carry) and forwarding it to the dock card via the `terminal-data` event,
+/// tagged with `id` so the client can route it to the right tab's xterm.js
+/// instance — every tab's reader thread emits on the same global event name,
+/// there's no per-tab event channel. EOF (child exited, pipe closed) fires
+/// `terminal-exit` once (same `id` tag) and returns.
+fn spawn_reader(app: AppHandle, id: u32, mut reader: Box<dyn Read + Send>) {
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
         loop {
             match reader.read(&mut buf) {
                 Ok(0) | Err(_) => {
-                    let _ = app.emit("terminal-exit", ());
+                    let _ = app.emit("terminal-exit", TerminalExitEvent { id });
                     return;
                 }
                 Ok(n) => {
                     let encoded = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
-                    let _ = app.emit("terminal-data", encoded);
+                    let _ = app.emit("terminal-data", TerminalDataEvent { id, data: encoded });
                 }
             }
         }
@@ -83,6 +102,7 @@ pub fn terminal_spawn(
     app: AppHandle,
     state: State<'_, AppState>,
     term_state: State<'_, TerminalState>,
+    id: u32,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
@@ -90,7 +110,11 @@ pub fn terminal_spawn(
     // Idempotent: reopening the card after just hiding it (not closing it)
     // should reattach to the still-running shell, not spawn a second one on
     // top of it — only a genuinely dead session (or none yet) gets replaced.
-    if let Some(session) = guard.as_mut() {
+    // In practice the client only calls this once per id (its own `spawned`
+    // flag guards re-calling it for a tab already known to be live) — this
+    // is a backstop against client/server state ever drifting apart, not the
+    // primary guard.
+    if let Some(session) = guard.get_mut(&id) {
         if matches!(session.child.try_wait(), Ok(None)) {
             return Ok(());
         }
@@ -113,24 +137,24 @@ pub fn terminal_spawn(
     let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
 
-    *guard = Some(TerminalSession { writer, master: pair.master, child });
+    guard.insert(id, TerminalSession { writer, master: pair.master, child });
     drop(guard);
 
-    spawn_reader(app, reader);
+    spawn_reader(app, id, reader);
     Ok(())
 }
 
 #[tauri::command]
-pub fn terminal_write(term_state: State<'_, TerminalState>, data: String) -> Result<(), String> {
+pub fn terminal_write(term_state: State<'_, TerminalState>, id: u32, data: String) -> Result<(), String> {
     let mut guard = term_state.0.lock().unwrap();
-    let session = guard.as_mut().ok_or("no terminal session")?;
+    let session = guard.get_mut(&id).ok_or("no terminal session")?;
     session.writer.write_all(data.as_bytes()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn terminal_resize(term_state: State<'_, TerminalState>, cols: u16, rows: u16) -> Result<(), String> {
+pub fn terminal_resize(term_state: State<'_, TerminalState>, id: u32, cols: u16, rows: u16) -> Result<(), String> {
     let guard = term_state.0.lock().unwrap();
-    let session = guard.as_ref().ok_or("no terminal session")?;
+    let session = guard.get(&id).ok_or("no terminal session")?;
     session
         .master
         .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
@@ -138,27 +162,44 @@ pub fn terminal_resize(term_state: State<'_, TerminalState>, cols: u16, rows: u1
 }
 
 #[tauri::command]
-pub fn terminal_close(term_state: State<'_, TerminalState>) -> Result<(), String> {
-    kill(&term_state);
+pub fn terminal_close(term_state: State<'_, TerminalState>, id: u32) -> Result<(), String> {
+    kill_one(&term_state, id);
     Ok(())
 }
 
-/// Shared by the `terminal_close` command and the app's real quit path
-/// (`MENU_QUIT` in lib.rs — `CloseRequested` only hides to tray and leaves
-/// this running, same as it leaves the dsh server running).
-pub fn kill(term_state: &TerminalState) {
-    if let Some(mut session) = term_state.0.lock().unwrap().take() {
-        // `session.child.kill()` alone only reaches the shell itself, not
-        // whatever it launched interactively (an npm/python/nested-shell
-        // process) — those would otherwise survive as orphans. Fall back to
-        // the direct kill only if we can't get a pid to hand to the tree-kill
-        // (portable_pty::Child::process_id can return None, e.g. once the
-        // process has already exited on its own).
-        match session.child.process_id() {
-            Some(pid) => crate::server::kill_process_tree(pid),
-            None => {
-                let _ = session.child.kill();
-            }
+/// `session.child.kill()` alone only reaches the shell itself, not whatever
+/// it launched interactively (an npm/python/nested-shell process) — those
+/// would otherwise survive as orphans. Fall back to the direct kill only if
+/// we can't get a pid to hand to the tree-kill (portable_pty::Child::process_id
+/// can return None, e.g. once the process has already exited on its own).
+fn kill_session(mut session: TerminalSession) {
+    match session.child.process_id() {
+        Some(pid) => crate::server::kill_process_tree(pid),
+        None => {
+            let _ = session.child.kill();
         }
+    }
+}
+
+/// Shared by the `terminal_close` command (one tab's own × button) and
+/// restarting a tab (close then immediately re-spawn the same id).
+pub fn kill_one(term_state: &TerminalState, id: u32) {
+    if let Some(session) = term_state.0.lock().unwrap().remove(&id) {
+        kill_session(session);
+    }
+}
+
+/// Every open tab at once — for the app's real quit path (`MENU_QUIT` in
+/// lib.rs — `CloseRequested` only hides to tray and leaves this running,
+/// same as it leaves the dsh server running), which by then has no reason to
+/// know or care what tab ids exist client-side. The dock's own "close all
+/// tabs" header button doesn't call this: it still needs its own client-side
+/// loop over its tab map either way to dispose each xterm.js instance and
+/// its DOM, so it just calls terminal_close per id from there rather than
+/// this app also growing a bulk-close command redundant with that loop.
+pub fn kill(term_state: &TerminalState) {
+    let sessions: Vec<TerminalSession> = term_state.0.lock().unwrap().drain().map(|(_, session)| session).collect();
+    for session in sessions {
+        kill_session(session);
     }
 }

@@ -87,6 +87,10 @@
         <line x1="18" y1="6" x2="6" y2="18"></line>
         <line x1="6" y1="6" x2="18" y2="18"></line>
       </symbol>
+      <symbol id="icon-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </symbol>
       <symbol id="icon-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
         <polyline points="7 10 12 15 17 10"></polyline>
@@ -326,12 +330,22 @@
               <div class="dock-card-header">
                 <span class="dock-card-title" data-i18n="terminal">终端</span>
                 <div class="dock-card-actions">
-                  <button id="btn-terminal-restart" title="重启终端" data-i18n-title="restartTerminalTitle">
+                  <button id="btn-terminal-add-tab" title="新建终端标签页" data-i18n-title="newTerminalTabTitle">
+                    <svg class="icon"><use href="#icon-plus"></use></svg>
+                  </button>
+                  <button id="btn-terminal-restart" title="重启当前标签页" data-i18n-title="restartTerminalTitle">
                     <svg class="icon"><use href="#icon-refresh"></use></svg>
                   </button>
-                  <button id="btn-terminal-close" title="关闭终端" data-i18n-title="closeTerminalTitle">✕</button>
+                  <button id="btn-terminal-close" title="关闭全部标签页" data-i18n-title="closeTerminalTitle">✕</button>
                 </div>
               </div>
+              <!--
+                One tab per PTY shell (see terminalTabs in app.js) — the
+                header's own restart/close buttons above act on the active
+                tab / all tabs respectively, independent of each tab's own
+                close × here which only ever touches that one tab.
+              -->
+              <div id="terminal-tabs"></div>
               <div id="terminal-container"></div>
             </section>
 

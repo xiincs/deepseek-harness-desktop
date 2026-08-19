@@ -40,7 +40,9 @@ const els = {
   btnToolbarPlugins: document.getElementById("btn-toolbar-plugins"),
   dockViewFiles: document.getElementById("dock-view-files"),
   cardTerminal: document.getElementById("card-terminal"),
+  terminalTabsEl: document.getElementById("terminal-tabs"),
   terminalContainer: document.getElementById("terminal-container"),
+  btnTerminalAddTab: document.getElementById("btn-terminal-add-tab"),
   btnTerminalRestart: document.getElementById("btn-terminal-restart"),
   btnTerminalClose: document.getElementById("btn-terminal-close"),
   cardDiff: document.getElementById("card-diff"),
@@ -154,8 +156,10 @@ const STRINGS = {
     cancel: "取消",
     discardChanges: "放弃",
     closePreviewTitle: "关闭预览",
-    restartTerminalTitle: "重启终端",
-    closeTerminalTitle: "关闭终端",
+    newTerminalTabTitle: "新建终端标签页",
+    restartTerminalTitle: "重启当前标签页",
+    closeTerminalTitle: "关闭全部标签页",
+    closeTerminalTabTitle: "关闭",
     pluginSearchPlaceholder: "搜索插件名称或描述…",
     sortByStarsTitle: "按 star 数排序",
     sortByStarsAsc: "按 star 数从低到高排序",
@@ -257,8 +261,10 @@ const STRINGS = {
     cancel: "Cancel",
     discardChanges: "Discard",
     closePreviewTitle: "Close Preview",
-    restartTerminalTitle: "Restart Terminal",
-    closeTerminalTitle: "Close Terminal",
+    newTerminalTabTitle: "New Terminal Tab",
+    restartTerminalTitle: "Restart Current Tab",
+    closeTerminalTitle: "Close All Tabs",
+    closeTerminalTabTitle: "Close",
     pluginSearchPlaceholder: "Search plugin name or description…",
     sortByStarsTitle: "Sort by star count",
     sortByStarsAsc: "Sort by star count, low to high",
@@ -708,7 +714,7 @@ function initCardsResizeHandle() {
 // is actually set, would put the exact same stale-selection race right back
 // after fixing it in the caller. Only meaningful for view: "files" —
 // opening the terminal/diff views already have their own, independent
-// readiness gates (ensureTerminal()/refreshDiffView()) that this option
+// readiness gates (ensureTerminalOpen()/refreshDiffView()) that this option
 // doesn't touch either way.
 function setDockView(view, { refresh = true } = {}) {
   // view: "files" | "terminal" | "diff" | null (closed) — the plugin market
@@ -732,7 +738,7 @@ function setDockView(view, { refresh = true } = {}) {
 
   if (filesOpen && refresh) refreshPanel();
   if (terminalOpen) {
-    ensureTerminal().then(() => requestAnimationFrame(fitTerminal));
+    ensureTerminalOpen();
   }
   // Rebuilt fresh on every open rather than kept mounted across a close —
   // see the "diff preview" section's own comment for why (no background
@@ -751,20 +757,21 @@ function toggleDock() {
 
 // ── terminal ─────────────────────────────────────────────────────────────
 //
-// One singleton xterm.js instance for the card's whole lifetime — closing
-// the card hides it (and, via btn-terminal-close, kills the backing shell),
-// but the Terminal object itself and its scrollback are kept around so
-// reopening doesn't pay xterm's own init cost again. The Rust-side session
-// (terminal.rs) has the same "hide keeps it alive" split: only an explicit
-// close/restart, or the app actually quitting, kills the shell process.
-
-let xterm = null;
-let fitAddon = null;
-// Tracks whether *this renderer* believes a backend shell is alive — reset
-// on close/restart and on the backend's own "terminal-exit" event (e.g. the
-// user typed `exit`), so the next open respawns instead of writing into a
-// dead pty.
-let terminalSpawned = false;
+// Multiple tabs, each its own xterm.js instance + backing PTY shell
+// (terminal.rs, keyed by the same id this side generates) — closing the
+// dock (toolbar toggle, or switching to Files/Diff) just hides #card-terminal
+// and every tab's shell keeps running underneath, same "hide keeps it alive"
+// idea the old singleton terminal already had, now per tab instead of once.
+// Only three things actually kill a shell: a tab's own × (that tab only),
+// btn-terminal-close (all tabs, then hides the dock), or the app quitting
+// (terminal::kill in terminal.rs, every tab regardless of client state).
+//
+// terminalTabs is keyed by id and iterated in insertion order for rendering
+// the tab strip — both are exactly what a Map already gives for free, no
+// separate ordered array needed alongside it.
+const terminalTabs = new Map();
+let activeTerminalId = null;
+let nextTerminalId = 1;
 
 function base64ToBytes(b64) {
   const bin = atob(b64);
@@ -773,51 +780,178 @@ function base64ToBytes(b64) {
   return bytes;
 }
 
-// No-op while the card is hidden (display:none reports a zero-size box —
-// fitting against that would shrink the pty to 0 cols/rows) or before
-// xterm has ever been opened.
-function fitTerminal() {
-  if (!xterm || !fitAddon || els.cardTerminal.classList.contains("hidden")) return;
+// No-op while the dock is hidden (display:none reports a zero-size box —
+// fitting against that would shrink the pty to 0 cols/rows), before this
+// tab's xterm has ever been opened, or while it's a background tab: a
+// hidden .terminal-instance is also a zero-size box, and there's nothing to
+// gain from resizing a pty nobody's looking at — it gets fit properly the
+// moment it becomes the active tab again (see activateTerminalTab).
+function fitTerminalTab(tab) {
+  if (!tab.xterm || !tab.fitAddon || els.cardTerminal.classList.contains("hidden") || tab.id !== activeTerminalId) return;
   try {
-    fitAddon.fit();
+    tab.fitAddon.fit();
   } catch {
     return;
   }
-  if (terminalSpawned) {
-    invoke("terminal_resize", { cols: xterm.cols, rows: xterm.rows }).catch(() => {});
+  if (tab.spawned) {
+    invoke("terminal_resize", { id: tab.id, cols: tab.xterm.cols, rows: tab.xterm.rows }).catch(() => {});
   }
 }
 
-async function ensureTerminal() {
-  if (!xterm) {
-    const style = getComputedStyle(document.documentElement);
-    xterm = new window.XTerm.Terminal({
-      fontFamily: '"SF Mono", "JetBrains Mono", "Fira Code", Consolas, Menlo, monospace',
-      fontSize: 12.5,
-      cursorBlink: true,
-      theme: {
-        background: style.getPropertyValue("--terminal-bg").trim(),
-        foreground: style.getPropertyValue("--terminal-fg").trim(),
-      },
-    });
-    fitAddon = new window.XTerm.FitAddon();
-    xterm.loadAddon(fitAddon);
-    xterm.open(els.terminalContainer);
-    // Raw keystrokes/paste go straight to the pty — the shell on the other
-    // end owns line editing (backspace, history, completion), not us.
-    xterm.onData((data) => {
-      invoke("terminal_write", { data }).catch(() => {});
-    });
-    new ResizeObserver(fitTerminal).observe(els.terminalContainer);
-  }
-  if (terminalSpawned) return;
-  fitTerminal();
-  xterm.clear();
+function mountXtermForTab(tab) {
+  const style = getComputedStyle(document.documentElement);
+  tab.xterm = new window.XTerm.Terminal({
+    fontFamily: '"SF Mono", "JetBrains Mono", "Fira Code", Consolas, Menlo, monospace',
+    fontSize: 12.5,
+    cursorBlink: true,
+    theme: {
+      background: style.getPropertyValue("--terminal-bg").trim(),
+      foreground: style.getPropertyValue("--terminal-fg").trim(),
+    },
+  });
+  tab.fitAddon = new window.XTerm.FitAddon();
+  tab.xterm.loadAddon(tab.fitAddon);
+  tab.xterm.open(tab.container);
+  // Raw keystrokes/paste go straight to the pty — the shell on the other
+  // end owns line editing (backspace, history, completion), not us.
+  tab.xterm.onData((data) => {
+    invoke("terminal_write", { id: tab.id, data }).catch(() => {});
+  });
+  tab.resizeObserver = new ResizeObserver(() => fitTerminalTab(tab));
+  tab.resizeObserver.observe(tab.container);
+}
+
+// Spawns (or, after a restart's terminal_close, re-spawns) this tab's
+// backend shell — mirrors the old singleton ensureTerminal()'s spawn half
+// exactly (fit first so the very first spawn already has the right pty
+// size, then clear so a restart doesn't leave the previous shell's output
+// sitting above the fresh one).
+async function spawnTerminalTab(tab) {
+  if (tab.spawned) return;
+  fitTerminalTab(tab);
+  tab.xterm.clear();
   try {
-    await invoke("terminal_spawn", { cols: xterm.cols || 80, rows: xterm.rows || 24 });
-    terminalSpawned = true;
+    await invoke("terminal_spawn", { id: tab.id, cols: tab.xterm.cols || 80, rows: tab.xterm.rows || 24 });
+    tab.spawned = true;
   } catch (err) {
-    xterm.writeln(`\r\n\x1b[31m${t("terminalStartFailed", err)}\x1b[0m`);
+    tab.xterm.writeln(`\r\n\x1b[31m${t("terminalStartFailed", err)}\x1b[0m`);
+  }
+}
+
+// Switches which tab's .terminal-instance/.terminal-tab is visible —
+// doesn't touch spawn state at all, a background tab's shell keeps running
+// and producing output (buffered into its own xterm scrollback via the
+// terminal-data listener below) whether or not it's the one currently shown.
+function activateTerminalTab(id) {
+  if (id === activeTerminalId) return;
+  const prev = activeTerminalId !== null ? terminalTabs.get(activeTerminalId) : null;
+  if (prev) {
+    prev.container.classList.add("hidden");
+    prev.tabEl.classList.remove("terminal-tab-active");
+  }
+  const next = terminalTabs.get(id);
+  activeTerminalId = id;
+  next.container.classList.remove("hidden");
+  next.tabEl.classList.add("terminal-tab-active");
+  requestAnimationFrame(() => fitTerminalTab(next));
+  next.xterm?.focus();
+}
+
+// Row + close × in the tab strip, plus the (initially hidden) DOM container
+// its xterm instance will mount into — creation only, no xterm/PTY yet (see
+// addTerminalTab), so this alone is cheap enough to not need any special
+// handling beyond the usual DOM churn.
+function createTerminalTab() {
+  const id = nextTerminalId++;
+
+  const tabEl = document.createElement("div");
+  tabEl.className = "terminal-tab";
+  const label = document.createElement("span");
+  label.className = "terminal-tab-label";
+  label.textContent = String(id);
+  tabEl.appendChild(label);
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "terminal-tab-close";
+  closeBtn.title = t("closeTerminalTabTitle");
+  closeBtn.textContent = "✕";
+  tabEl.appendChild(closeBtn);
+  tabEl.addEventListener("click", (e) => {
+    if (e.target !== closeBtn) activateTerminalTab(id);
+  });
+  closeBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    closeTerminalTab(id);
+  });
+  els.terminalTabsEl.appendChild(tabEl);
+
+  const container = document.createElement("div");
+  container.className = "terminal-instance hidden";
+  els.terminalContainer.appendChild(container);
+
+  const tab = { id, xterm: null, fitAddon: null, resizeObserver: null, spawned: false, container, tabEl };
+  terminalTabs.set(id, tab);
+  return tab;
+}
+
+async function addTerminalTab() {
+  const tab = createTerminalTab();
+  // Activated before mounting (not after) so xterm.open() happens on an
+  // already-visible container, same timing the old singleton path always
+  // had (the dock card itself was already shown before ensureTerminal()
+  // ever ran) — xterm.js sizing itself off a still-hidden box is the kind
+  // of thing that's fine right up until the one time it isn't.
+  activateTerminalTab(tab.id);
+  mountXtermForTab(tab);
+  tab.xterm.focus();
+  await spawnTerminalTab(tab);
+}
+
+// Only ever removes what this call actually owns: this tab's backend
+// session, its xterm/ResizeObserver, and its two DOM nodes. Leaves picking
+// a new active tab (or closing the whole dock, if this was the last one) as
+// the one piece of shared cleanup, since both the tab's own × and
+// btn-terminal-close's "close every tab" loop funnel through here either
+// way and shouldn't each re-implement it.
+function closeTerminalTab(id) {
+  const tab = terminalTabs.get(id);
+  if (!tab) return;
+  invoke("terminal_close", { id }).catch(() => {});
+  tab.resizeObserver?.disconnect();
+  tab.xterm?.dispose();
+  tab.tabEl.remove();
+  tab.container.remove();
+  terminalTabs.delete(id);
+
+  if (terminalTabs.size === 0) {
+    activeTerminalId = null;
+    setDockView(null);
+    return;
+  }
+  if (activeTerminalId === id) {
+    activeTerminalId = null;
+    activateTerminalTab(terminalTabs.keys().next().value);
+  }
+}
+
+async function restartActiveTerminalTab() {
+  const tab = activeTerminalId !== null ? terminalTabs.get(activeTerminalId) : null;
+  if (!tab) return;
+  await invoke("terminal_close", { id: tab.id }).catch(() => {});
+  tab.spawned = false;
+  await spawnTerminalTab(tab);
+}
+
+// Entry point for opening the dock (setDockView) — first-ever open spawns
+// exactly one tab, same starting point the old singleton terminal always
+// had; reopening after just hiding the dock has tabs already, so it only
+// needs to re-fit whichever one is still active (a poll-free dock: nothing
+// resizes a background/hidden tab's pty, see fitTerminalTab, so the active
+// one can genuinely be stale here).
+async function ensureTerminalOpen() {
+  if (terminalTabs.size === 0) {
+    await addTerminalTab();
+  } else {
+    requestAnimationFrame(() => fitTerminalTab(terminalTabs.get(activeTerminalId)));
   }
 }
 
@@ -2246,10 +2380,18 @@ async function init() {
   }
 
   listen("server-status", (event) => render(event.payload));
-  listen("terminal-data", (event) => xterm?.write(base64ToBytes(event.payload)));
-  listen("terminal-exit", () => {
-    terminalSpawned = false;
-    xterm?.writeln(`\r\n\x1b[90m${t("processExited")}\x1b[0m`);
+  // Every tab's reader thread emits on this same global event name, tagged
+  // with its own id (terminal.rs's spawn_reader) — a tab already closed
+  // client-side (terminalTabs.delete) but whose backend session hadn't
+  // finished tearing down yet is a real possibility, hence the `?.`.
+  listen("terminal-data", (event) => {
+    terminalTabs.get(event.payload.id)?.xterm?.write(base64ToBytes(event.payload.data));
+  });
+  listen("terminal-exit", (event) => {
+    const tab = terminalTabs.get(event.payload.id);
+    if (!tab) return;
+    tab.spawned = false;
+    tab.xterm.writeln(`\r\n\x1b[90m${t("processExited")}\x1b[0m`);
   });
   listen("plugin-install", (event) => {
     const payload = event.payload;
@@ -2321,15 +2463,17 @@ async function init() {
       closePluginMarket();
     }
   });
-  els.btnTerminalRestart.addEventListener("click", async () => {
-    await invoke("terminal_close").catch(() => {});
-    terminalSpawned = false;
-    await ensureTerminal();
-  });
+  els.btnTerminalAddTab.addEventListener("click", addTerminalTab);
+  els.btnTerminalRestart.addEventListener("click", restartActiveTerminalTab);
+  // Closes every open tab, not just the active one — closeTerminalTab's own
+  // "last tab closed" branch handles hiding the dock once the loop empties
+  // terminalTabs, so there's nothing left to do after it beyond the loop
+  // itself. Snapshotted via spread first since closeTerminalTab mutates
+  // terminalTabs (.delete) as it goes — iterating the live Map while
+  // deleting from it mid-loop is exactly the kind of thing that's fine
+  // right up until it isn't.
   els.btnTerminalClose.addEventListener("click", () => {
-    invoke("terminal_close").catch(() => {});
-    terminalSpawned = false;
-    setDockView(null);
+    for (const id of [...terminalTabs.keys()]) closeTerminalTab(id);
   });
   // Collapses the Files card's tree/picker body without closing the whole
   // dock — independent from #card-file's own close button, per the "each

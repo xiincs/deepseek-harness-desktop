@@ -443,12 +443,81 @@ body.platform-decorated #toolbar-actions {
   min-height: 240px;
 }
 
+/* Scrolls horizontally rather than wrapping — a wrapped second row would
+   fight #card-terminal's own flex sizing (its height is meant to come from
+   #terminal-container below, not grow with tab count). Always shown once
+   the terminal view is open, even with a single tab: it's also that tab's
+   only close affordance, so hiding the strip at count 1 would hide that
+   too. */
+#terminal-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px 0;
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.terminal-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 5px 4px 10px;
+  border-radius: 6px 6px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.terminal-tab:hover {
+  background: var(--btn-hover-bg);
+}
+
+.terminal-tab-active {
+  background: var(--accent-tint-bg);
+  color: var(--accent-tint-text);
+}
+
+.terminal-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 10px;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.terminal-tab-close:hover {
+  background: color-mix(in srgb, currentColor 20%, transparent);
+}
+
+/* Holds one .terminal-instance per open tab, only one shown at a time (see
+   activateTerminalTab in app.js) — sized/padded/backgrounded here rather
+   than per-instance since exactly one is ever visible, so there's nothing
+   to gain from repeating the same rules on every hidden one too. */
 #terminal-container {
   flex: 1;
   min-height: 0;
   overflow: hidden;
   padding: 6px 8px;
   background: var(--terminal-bg);
+}
+
+.terminal-instance {
+  height: 100%;
+}
+
+.terminal-instance.hidden {
+  display: none;
 }
 
 /* Mutually exclusive with #dock-view-files and #card-terminal, same as
