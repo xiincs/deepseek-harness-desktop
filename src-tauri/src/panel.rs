@@ -763,8 +763,17 @@ pub fn reveal_in_file_manager(app: &tauri::AppHandle, root: &Path, rel_path: &st
 /// (TreeEntry.path), and string-concatenating that onto a workspace root
 /// itself in JS would need to reimplement platform-correct path joining
 /// there for no reason when Path::join already does it correctly here.
+///
+/// Strips Windows' `\\?\` verbatim-path prefix if present: `canonicalize()`
+/// (inside resolve_within_root) returns paths in that form on Windows —
+/// correct and necessary for actual filesystem calls (bypasses MAX_PATH),
+/// but not something a user wants to see after pasting "Copy Path" into
+/// Explorer's address bar or a random other tool, several of which don't
+/// handle it well.
 pub fn absolute_path(root: &Path, rel_path: &str) -> Result<String, String> {
-    Ok(resolve_within_root(root, rel_path)?.to_string_lossy().into_owned())
+    let resolved = resolve_within_root(root, rel_path)?;
+    let s = resolved.to_string_lossy();
+    Ok(s.strip_prefix(r"\\?\").unwrap_or(&s).to_string())
 }
 
 #[cfg(test)]
@@ -1354,7 +1363,11 @@ mod tests {
         fs::create_dir_all(dir.join("src")).unwrap();
         fs::write(dir.join("src").join("main.rs"), "").unwrap();
         let result = absolute_path(&dir, "src/main.rs").unwrap();
-        assert_eq!(std::path::Path::new(&result), dir.join("src").join("main.rs").canonicalize().unwrap());
+        let expected = dir.join("src").join("main.rs").canonicalize().unwrap();
+        let expected_str = expected.to_string_lossy();
+        let expected_stripped = expected_str.strip_prefix(r"\\?\").unwrap_or(&expected_str);
+        assert_eq!(result, expected_stripped);
+        assert!(!result.starts_with(r"\\?\"), "Copy Path shouldn't show Windows' verbatim-path prefix: {result}");
         let _ = fs::remove_dir_all(&dir);
     }
 
