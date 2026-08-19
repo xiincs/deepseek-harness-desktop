@@ -32,6 +32,7 @@ Tauri（Rust + WebView2）桌面壳，托管 `@deepseek-ai/dsh` 的 `dsh web` �
 - **`docs/DEVELOPMENT.md` 里写的环境变量覆盖项（`DSH_DESKTOP_NODE`/`DSH_DESKTOP_DSH_BIN`/`DSH_DESKTOP_RUNTIME_DIR` 等）是诊断"找不到 node/dsh"类问题时的第一入口**，不要在 `resolve_node`/`resolve_bin` 之外另起一套定位逻辑。
 - **测试原生窗口时，关闭方式必须带上子进程清理。** `taskkill` 要 `/F /T`（不带 `/T` 会留下孤儿 `dsh` Node 服务，下次重新编译/启动时可能撞端口冲突或读到脏状态）。
 - **手动验证原生窗口界面的改动（截图、点击、拖拽）应该让用户直接在真实窗口里操作确认，不要依赖自动化工具反复截图/读无障碍树来回合调试。** 桌面自动化对这个项目某些原生窗口的截图本身不可靠（历史上记录过纯黑图），反复来回的诊断成本远高于直接问用户"你看到的是什么"。
+- **原生 shell 的 zh/en 双语（`i18n.rs` + `ui/app.js` 里的 `STRINGS`/`t()`）跟 `dsh web`（iframe 里的网页）自己的 `locale.preference` 设置是两套完全独立、互不感知的机制，不是同一个开关。** 两边各自从系统/浏览器语言探测一次（Rust 侧 `sys_locale::get_locale()`，JS 侧 `navigator.language`），规则一致（探测到 `en*` 才用英文，其余一律回退中文），但没有任何代码把二者同步在一起——iframe 里的网页是完全隔离的远程页面，永远没有 Tauri IPC（见 `lib.rs` 顶部模块注释），这层壳读不到它的 `locale.preference`，也不该为此专门开一个通信通道。想要"跟随应用内语言设置"是行不通的；如果这个假设第二次被提出，说明这条边界需要重新在这里写清楚，而不是去改代码硬凑。
 
 ## 插件市场（`ui/app.js` 里 `plugin-market-*`，`server.rs` 里 `install_plugin`/`check_pnpm_available`/`install_pnpm`）
 
@@ -47,5 +48,6 @@ Tauri（Rust + WebView2）桌面壳，托管 `@deepseek-ai/dsh` 的 `dsh web` �
 - `src-tauri/src/panel.rs` — 右侧文件面板的文件树/Git 状态/编辑保存
 - `src-tauri/src/menu.rs` — 原生菜单栏 + 托盘
 - `src-tauri/src/terminal.rs` — 内嵌终端（ConPTY/winpty）
+- `src-tauri/src/i18n.rs` — 原生 shell（菜单/托盘/通知/少量错误提示）的 zh/en 探测与翻译，`ui/app.js` 里的 `STRINGS`/`t()` 是同一套规则在前端的独立实现
 - `ui/app.js` — 唯一的前端逻辑文件，启动页状态机、dock 面板、CodeMirror 编辑器、终端 xterm.js、插件市场全在这一个文件里
 - `docs/internal/HANDOFF.md` — 最近一轮开发的交接记录，每轮重写，读之前先看 git log 确认没有更新的版本

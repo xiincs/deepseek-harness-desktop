@@ -42,6 +42,11 @@ portable-pty = "0.9"
 # control/partial-UTF-8 bytes directly, and this sidesteps that instead of
 # hand-rolling the escaping.
 base64 = "0.22"
+# OS UI-language detection for the native shell's zh/en strings (i18n.rs) —
+# the same crate tauri-plugin-os itself uses internally for its `locale()`
+# command, pulled in directly since only the native (non-JS) side needs it
+# here.
+sys-locale = "0.3"
 
 [target.'cfg(windows)'.dependencies]
 # Raw WebView2 settings access (disabling the default context menu) —

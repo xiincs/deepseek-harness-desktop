@@ -152,50 +152,50 @@
       <div id="toolbar" data-tauri-drag-region>
         <div id="toolbar-left">
           <div id="app-menu-wrap">
-            <button id="btn-app-menu" class="toolbar-btn" title="菜单" aria-haspopup="true" aria-expanded="false">
+            <button id="btn-app-menu" class="toolbar-btn" title="菜单" data-i18n-title="menu" aria-haspopup="true" aria-expanded="false">
               <svg class="icon"><use href="#icon-menu"></use></svg>
             </button>
             <div id="app-menu" class="app-menu hidden" role="menu">
-              <button class="app-menu-item" data-menu-id="open_browser" role="menuitem">在浏览器中打开</button>
-              <button class="app-menu-item" data-menu-id="restart" role="menuitem">重启服务</button>
-              <button class="app-menu-item" data-menu-id="open_data_dir" role="menuitem">打开数据目录</button>
+              <button class="app-menu-item" data-menu-id="open_browser" role="menuitem" data-i18n="openInBrowser">在浏览器中打开</button>
+              <button class="app-menu-item" data-menu-id="restart" role="menuitem" data-i18n="restartService">重启服务</button>
+              <button class="app-menu-item" data-menu-id="open_data_dir" role="menuitem" data-i18n="appMenuOpenDataDir">打开数据目录</button>
               <div class="app-menu-sep"></div>
               <button class="app-menu-item" data-menu-id="toggle_autostart" role="menuitemcheckbox">
                 <svg class="icon app-menu-check hidden"><use href="#icon-check"></use></svg>
-                <span>开机自动启动</span>
+                <span data-i18n="autostartToggle">开机自动启动</span>
               </button>
               <div class="app-menu-sep"></div>
-              <button class="app-menu-item" data-menu-id="quit" role="menuitem">退出</button>
+              <button class="app-menu-item" data-menu-id="quit" role="menuitem" data-i18n="quit">退出</button>
             </div>
           </div>
-          <button id="btn-toolbar-plugins" class="toolbar-btn" title="插件市场">
+          <button id="btn-toolbar-plugins" class="toolbar-btn" title="插件市场" data-i18n-title="pluginMarket">
             <svg class="icon"><use href="#icon-package"></use></svg>
           </button>
         </div>
-        <div id="toolbar-title">探索未至之境</div>
+        <div id="toolbar-title" data-i18n="tagline">探索未至之境</div>
         <div id="toolbar-actions">
-          <button id="btn-toolbar-terminal" class="toolbar-btn" title="终端">
+          <button id="btn-toolbar-terminal" class="toolbar-btn" title="终端" data-i18n-title="terminal">
             <svg class="icon"><use href="#icon-terminal"></use></svg>
           </button>
-          <button id="btn-toolbar-diff" class="toolbar-btn" disabled title="Diff（即将推出）">
+          <button id="btn-toolbar-diff" class="toolbar-btn" disabled title="Diff（即将推出）" data-i18n-title="diffComingSoon">
             <svg class="icon"><use href="#icon-columns"></use></svg>
           </button>
-          <button id="btn-toolbar-files" class="toolbar-btn" title="文件">
+          <button id="btn-toolbar-files" class="toolbar-btn" title="文件" data-i18n-title="files">
             <svg class="icon"><use href="#icon-folder"></use></svg>
           </button>
         </div>
         <div id="window-controls" class="hidden">
-          <button id="btn-win-minimize" class="window-btn" title="最小化">
+          <button id="btn-win-minimize" class="window-btn" title="最小化" data-i18n-title="minimize">
             <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">
               <path d="M0 5h10" stroke="currentColor" stroke-width="1" />
             </svg>
           </button>
-          <button id="btn-win-maximize" class="window-btn" title="最大化">
+          <button id="btn-win-maximize" class="window-btn" title="最大化" data-i18n-title="maximize">
             <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">
               <rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1" />
             </svg>
           </button>
-          <button id="btn-win-close" class="window-btn window-btn-close" title="关闭">
+          <button id="btn-win-close" class="window-btn window-btn-close" title="关闭" data-i18n-title="close">
             <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">
               <path d="M0 0l10 10M10 0L0 10" stroke="currentColor" stroke-width="1" />
             </svg>
@@ -209,8 +209,8 @@
           <div id="update-banner" class="update-banner hidden">
             <span id="update-text"></span>
             <div class="update-actions">
-              <button id="btn-update-install" class="primary">立即更新</button>
-              <button id="btn-update-dismiss">忽略</button>
+              <button id="btn-update-install" class="primary" data-i18n="updateNow">立即更新</button>
+              <button id="btn-update-dismiss" data-i18n="dismiss">忽略</button>
             </div>
           </div>
 
@@ -229,34 +229,34 @@
                 <use class="boot-logo-trace" href="#boot-logo-outline"></use>
               </svg>
             </div>
-            <h1>正在启动 DeepSeek Harness…</h1>
-            <p class="muted" id="starting-detail">准备本地服务</p>
+            <h1 data-i18n="startingTitle">正在启动 DeepSeek Harness…</h1>
+            <p class="muted" id="starting-detail" data-i18n="preparingLocalService">准备本地服务</p>
             <div class="actions">
-              <button id="btn-logs-starting">查看日志</button>
+              <button id="btn-logs-starting" data-i18n="viewLogs">查看日志</button>
             </div>
             <pre id="log-box-starting" class="log hidden"></pre>
 
             <!-- first-run provider tip (non-blocking, shown once, dismissed via localStorage) -->
             <div id="provider-tip" class="provider-tip hidden">
-              <span
+              <span data-i18n="providerTip"
                 >首次使用提示：默认使用 DeepSeek 官方模型。如需接入 OpenAI / Anthropic / Gemini
                 等其他模型，进入后可在「设置 → 模型 → 添加提供方」中配置，随时可改。</span
               >
               <div class="provider-tip-actions">
-                <button id="btn-provider-tip-dismiss">知道了</button>
+                <button id="btn-provider-tip-dismiss" data-i18n="gotIt">知道了</button>
               </div>
             </div>
           </section>
 
           <!-- error -->
           <section id="state-error" class="card hidden">
-            <h1>启动失败</h1>
+            <h1 data-i18n="startupFailed">启动失败</h1>
             <p class="error" id="error-message"></p>
             <div class="actions">
-              <button id="btn-retry" class="primary">重试</button>
-              <button id="btn-restart">重启服务</button>
-              <button id="btn-logs">查看日志</button>
-              <button id="btn-open-browser">在浏览器中打开</button>
+              <button id="btn-retry" class="primary" data-i18n="retry">重试</button>
+              <button id="btn-restart" data-i18n="restartService">重启服务</button>
+              <button id="btn-logs" data-i18n="viewLogs">查看日志</button>
+              <button id="btn-open-browser" data-i18n="openInBrowser">在浏览器中打开</button>
             </div>
             <pre id="log-box" class="log hidden"></pre>
           </section>
@@ -280,18 +280,18 @@
             <div id="dock-view-files">
               <section id="card-files" class="dock-card">
                 <div class="dock-card-header">
-                  <span class="dock-card-title">文件</span>
+                  <span class="dock-card-title" data-i18n="files">文件</span>
                   <div class="dock-card-actions">
-                    <button id="btn-panel-refresh" title="刷新文件树与 Git 状态">
+                    <button id="btn-panel-refresh" title="刷新文件树与 Git 状态" data-i18n-title="refreshTreeTitle">
                       <svg class="icon"><use href="#icon-refresh"></use></svg>
                     </button>
-                    <button id="btn-files-collapse" title="收起">
+                    <button id="btn-files-collapse" title="收起" data-i18n-title="collapse">
                       <svg class="icon"><use href="#icon-chevron-up"></use></svg>
                     </button>
                   </div>
                 </div>
                 <div class="select-wrap">
-                  <select id="panel-workspace-select" title="选择要在文件树中查看的工作区"></select>
+                  <select id="panel-workspace-select" title="选择要在文件树中查看的工作区" data-i18n-title="chooseWorkspaceTitle"></select>
                   <svg class="select-chevron"><use href="#icon-chevron-down"></use></svg>
                 </div>
                 <div id="panel-tree"></div>
@@ -310,12 +310,12 @@
                 <div class="dock-card-header">
                   <div id="panel-preview-title-group">
                     <span id="panel-preview-title"></span>
-                    <span id="panel-preview-dirty-dot" class="hidden" title="有未保存的改动">●</span>
+                    <span id="panel-preview-dirty-dot" class="hidden" title="有未保存的改动" data-i18n-title="unsavedChangesTitle">●</span>
                   </div>
                   <div class="dock-card-actions">
-                    <button id="btn-preview-revert" class="hidden" title="放弃改动，还原为已保存内容">还原</button>
-                    <button id="btn-preview-save" class="hidden" title="保存改动 (Ctrl+S)">保存</button>
-                    <button id="btn-preview-close" title="关闭预览">✕</button>
+                    <button id="btn-preview-revert" class="hidden" title="放弃改动，还原为已保存内容" data-i18n-title="revertTitle" data-i18n="revert">还原</button>
+                    <button id="btn-preview-save" class="hidden" title="保存改动 (Ctrl+S)" data-i18n-title="saveTitle" data-i18n="save">保存</button>
+                    <button id="btn-preview-close" title="关闭预览" data-i18n-title="closePreviewTitle">✕</button>
                   </div>
                 </div>
                 <div id="panel-preview-body"></div>
@@ -324,12 +324,12 @@
 
             <section id="card-terminal" class="dock-card hidden">
               <div class="dock-card-header">
-                <span class="dock-card-title">终端</span>
+                <span class="dock-card-title" data-i18n="terminal">终端</span>
                 <div class="dock-card-actions">
-                  <button id="btn-terminal-restart" title="重启终端">
+                  <button id="btn-terminal-restart" title="重启终端" data-i18n-title="restartTerminalTitle">
                     <svg class="icon"><use href="#icon-refresh"></use></svg>
                   </button>
-                  <button id="btn-terminal-close" title="关闭终端">✕</button>
+                  <button id="btn-terminal-close" title="关闭终端" data-i18n-title="closeTerminalTitle">✕</button>
                 </div>
               </div>
               <div id="terminal-container"></div>
@@ -361,10 +361,10 @@
         <div class="dock-card-header">
           <span id="plugin-market-title" class="dock-card-title dock-card-title-icon">
             <svg class="icon"><use href="#icon-package"></use></svg>
-            插件市场
+            <span data-i18n="pluginMarket">插件市场</span>
           </span>
           <div class="dock-card-actions">
-            <button id="btn-plugin-market-close" title="关闭">
+            <button id="btn-plugin-market-close" title="关闭" data-i18n-title="close">
               <svg class="icon"><use href="#icon-x"></use></svg>
             </button>
           </div>
@@ -375,7 +375,7 @@
           <div id="plugin-market-toolbar">
             <div id="plugin-market-search-wrap" class="input-icon-wrap">
               <svg class="input-icon"><use href="#icon-search"></use></svg>
-              <input id="plugin-market-search" type="search" placeholder="搜索插件名称或描述…" autocomplete="off" />
+              <input id="plugin-market-search" type="search" placeholder="搜索插件名称或描述…" data-i18n-placeholder="pluginSearchPlaceholder" autocomplete="off" />
             </div>
             <div class="select-wrap select-wrap-inline">
               <select id="plugin-market-category"></select>
@@ -388,7 +388,7 @@
               first already), so there's no third "unsorted" state to cycle
               through, just these two.
             -->
-            <button id="btn-plugin-market-sort" class="plugin-market-sort-btn" title="按 star 数排序">
+            <button id="btn-plugin-market-sort" class="plugin-market-sort-btn" title="按 star 数排序" data-i18n-title="sortByStarsTitle">
               <svg class="icon"><use href="#icon-star"></use></svg>
               <svg id="plugin-market-sort-icon" class="icon"><use href="#icon-arrow-down"></use></svg>
             </button>
@@ -408,7 +408,7 @@
         <div id="plugin-market-confirm" class="hidden">
           <button id="btn-plugin-confirm-back" class="link-back">
             <svg class="icon"><use href="#icon-chevron-right"></use></svg>
-            返回列表
+            <span data-i18n="backToList">返回列表</span>
           </button>
           <h3 id="plugin-confirm-name"></h3>
           <p id="plugin-confirm-desc" class="muted"></p>
@@ -416,12 +416,12 @@
           <div class="plugin-confirm-warning">
             <svg class="plugin-confirm-warning-icon"><use href="#icon-alert-triangle"></use></svg>
             <span>
-              <strong>安装第三方插件存在风险。</strong>
-              插件会以当前用户权限运行第三方代码，可读取本机文件、使用你的登录凭据、访问网络，安装/审批环节不会对其进行沙箱隔离。来源仓库的构建脚本也会在安装时执行。仅安装你信任的来源。
+              <strong data-i18n="pluginRiskTitle">安装第三方插件存在风险。</strong>
+              <span data-i18n="pluginRiskBody">插件会以当前用户权限运行第三方代码，可读取本机文件、使用你的登录凭据、访问网络，安装/审批环节不会对其进行沙箱隔离。来源仓库的构建脚本也会在安装时执行。仅安装你信任的来源。</span>
             </span>
           </div>
           <div id="plugin-confirm-cmd-wrap">
-            <span class="dock-card-title">将执行的命令</span>
+            <span class="dock-card-title" data-i18n="commandToRun">将执行的命令</span>
             <code id="plugin-confirm-cmd"></code>
           </div>
           <!--
@@ -435,33 +435,33 @@
           <div id="plugin-confirm-pnpm-missing" class="plugin-confirm-warning plugin-confirm-warning-pnpm hidden">
             <svg class="plugin-confirm-warning-icon"><use href="#icon-alert-circle"></use></svg>
             <span>
-              <strong>未检测到 pnpm。</strong>
-              插件安装依赖 pnpm，请先安装后再继续。
+              <strong data-i18n="pnpmNotFoundTitle">未检测到 pnpm。</strong>
+              <span data-i18n="pnpmNotFoundBody">插件安装依赖 pnpm，请先安装后再继续。</span>
               <div class="actions plugin-confirm-pnpm-actions">
                 <button id="btn-plugin-install-pnpm">
                   <svg id="btn-plugin-install-pnpm-icon" class="icon"><use href="#icon-download"></use></svg>
-                  <span id="btn-plugin-install-pnpm-label">一键安装 pnpm</span>
+                  <span id="btn-plugin-install-pnpm-label" data-i18n="installPnpmOneClick">一键安装 pnpm</span>
                 </button>
               </div>
             </span>
           </div>
           <div class="actions plugin-confirm-actions">
-            <button id="btn-plugin-confirm-source" title="在浏览器中查看来源仓库">
+            <button id="btn-plugin-confirm-source" title="在浏览器中查看来源仓库" data-i18n-title="viewSourceTitle">
               <svg class="icon"><use href="#icon-external-link"></use></svg>
-              查看来源
+              <span data-i18n="viewSource">查看来源</span>
             </button>
             <button id="btn-plugin-confirm-install" class="primary">
               <svg id="btn-plugin-confirm-install-icon" class="icon"><use href="#icon-download"></use></svg>
-              <span id="btn-plugin-confirm-install-label">确认安装</span>
+              <span id="btn-plugin-confirm-install-label" data-i18n="confirmInstall">确认安装</span>
             </button>
           </div>
         </div>
 
         <div id="plugin-install-log-wrap" class="hidden">
           <div class="dock-card-header">
-            <span class="dock-card-title">安装日志</span>
+            <span class="dock-card-title" data-i18n="installLog">安装日志</span>
             <div class="dock-card-actions">
-              <button id="btn-plugin-install-log-close" title="关闭">
+              <button id="btn-plugin-install-log-close" title="关闭" data-i18n-title="close">
                 <svg class="icon"><use href="#icon-x"></use></svg>
               </button>
             </div>

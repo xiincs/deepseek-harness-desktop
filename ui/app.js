@@ -86,6 +86,245 @@ const els = {
   btnPreviewRevert: document.getElementById("btn-preview-revert"),
 };
 
+// ── i18n ─────────────────────────────────────────────────────────────────
+//
+// This shell (index.html + this file) is its own bilingual surface,
+// deliberately independent of the harness iframe's own locale.preference
+// setting: that page is a plain remote page with zero Tauri IPC access (see
+// lib.rs's module doc comment), so there's no channel to read its setting
+// through, and no reason to invent one. Detected straight from
+// navigator.language instead — WebView2/WKWebView both set this from the OS
+// UI language — using the same "positively-detected English, else Chinese"
+// fallback @deepseek-ai/dsh-client-locale itself uses (see GitHub issue
+// #23's own analysis of that package). menu.rs/lib.rs/server.rs/panel.rs
+// mirror this exact rule on the native (Rust) side of the shell, via
+// sys_locale — the two halves detect independently but land on the same
+// answer since both read the same OS setting.
+const LANG = (navigator.language || "zh").toLowerCase().startsWith("en") ? "en" : "zh";
+document.documentElement.lang = LANG === "en" ? "en" : "zh-CN";
+
+const STRINGS = {
+  zh: {
+    menu: "菜单",
+    openInBrowser: "在浏览器中打开",
+    restartService: "重启服务",
+    appMenuOpenDataDir: "打开数据目录",
+    autostartToggle: "开机自动启动",
+    quit: "退出",
+    pluginMarket: "插件市场",
+    tagline: "探索未至之境",
+    terminal: "终端",
+    diffComingSoon: "Diff（即将推出）",
+    files: "文件",
+    minimize: "最小化",
+    maximize: "最大化",
+    restore: "还原",
+    close: "关闭",
+    updateNow: "立即更新",
+    dismiss: "忽略",
+    startingTitle: "正在启动 DeepSeek Harness…",
+    preparingLocalService: "准备本地服务",
+    viewLogs: "查看日志",
+    hideLogs: "隐藏日志",
+    providerTip:
+      "首次使用提示：默认使用 DeepSeek 官方模型。如需接入 OpenAI / Anthropic / Gemini " +
+      "等其他模型，进入后可在「设置 → 模型 → 添加提供方」中配置，随时可改。",
+    gotIt: "知道了",
+    startupFailed: "启动失败",
+    retry: "重试",
+    refreshTreeTitle: "刷新文件树与 Git 状态",
+    collapse: "收起",
+    chooseWorkspaceTitle: "选择要在文件树中查看的工作区",
+    unsavedChangesTitle: "有未保存的改动",
+    revert: "还原",
+    revertTitle: "放弃改动，还原为已保存内容",
+    save: "保存",
+    saveTitle: "保存改动 (Ctrl+S)",
+    closePreviewTitle: "关闭预览",
+    restartTerminalTitle: "重启终端",
+    closeTerminalTitle: "关闭终端",
+    pluginSearchPlaceholder: "搜索插件名称或描述…",
+    sortByStarsTitle: "按 star 数排序",
+    sortByStarsAsc: "按 star 数从低到高排序",
+    sortByStarsDesc: "按 star 数从高到低排序",
+    backToList: "返回列表",
+    pluginRiskTitle: "安装第三方插件存在风险。",
+    pluginRiskBody:
+      "插件会以当前用户权限运行第三方代码，可读取本机文件、使用你的登录凭据、访问网络，安装/审批环节不会对其进行沙箱隔离。来源仓库的构建脚本也会在安装时执行。仅安装你信任的来源。",
+    commandToRun: "将执行的命令",
+    pnpmNotFoundTitle: "未检测到 pnpm。",
+    pnpmNotFoundBody: "插件安装依赖 pnpm，请先安装后再继续。",
+    installPnpmOneClick: "一键安装 pnpm",
+    installing: "安装中…",
+    viewSource: "查看来源",
+    viewSourceTitle: "在浏览器中查看来源仓库",
+    confirmInstall: "确认安装",
+    checkingEnvironment: "正在检测环境…",
+    installLog: "安装日志",
+
+    unknownError: "未知错误",
+    serviceStopped: (code) => `服务已停止（exit ${code}）。`,
+    statusFetchFailed: (err) => `无法获取状态: ${err}`,
+    logReadFailed: (err) => `无法读取日志: ${err}`,
+    allCategories: "全部分类",
+    invalidResponseFormat: "响应格式不正确",
+    pluginCountStatus: (shown, total, capped) =>
+      `${shown} / ${total} 个插件${capped ? `（仅显示前 ${PLUGIN_GRID_RENDER_CAP} 个，请搜索缩小范围）` : ""}`,
+    noPluginsMatched: "没有匹配的插件。",
+    install: "安装",
+    loadingCatalog: "正在加载插件目录…",
+    catalogLoadFailed: (err) => `插件目录加载失败: ${err}`,
+    installStartFailed: (err) => `启动安装失败: ${err}`,
+    sourceMeta: (url, stars) => `来源：${url} · ★ ${stars}`,
+    processExited: "[进程已结束]",
+    terminalStartFailed: (err) => `终端启动失败: ${err}`,
+    installComplete: "安装完成。",
+    installFailedExit: (code) => `安装失败（exit ${code}）。`,
+    pnpmInstallComplete: "pnpm 安装完成。",
+    pnpmInstallFailedExit: (code) => `pnpm 安装失败（exit ${code}）。`,
+    startFailed: (err) => `启动失败: ${err}`,
+    restartFailed: (err) => `重启失败: ${err}`,
+    updating: "正在更新…",
+    updateFailed: (err) => `更新失败: ${err}`,
+    newVersionFound: (version) => `发现新版本 ${version}`,
+    confirmDiscardChanges: "有未保存的改动，确定要放弃吗？",
+    cannotReadHistoricalContent: "无法读取此文件的历史内容",
+    binaryFileNoPreview: "二进制文件，无法预览",
+    fileTooLarge: (mb) => `文件过大（${mb} MB），未加载预览`,
+    loading: "加载中…",
+    previewLoadFailed: (err) => `预览加载失败: ${err}`,
+    confirmRevert: "放弃当前改动，还原为上次保存的内容？",
+    saveFailed: (err) => `保存失败: ${err}`,
+    autoFollowWithLabel: (label) => `自动跟随（${label}）`,
+    autoFollowSession: "自动跟随当前会话",
+    emptyWorkspace: "空工作区",
+    treeLoadFailed: (err) => `无法加载文件树: ${err}`,
+    fileNotInKnownWorkspace: "该文件不属于任何已知工作区",
+    dataDirLabel: (path) => `数据目录 ${path}`,
+  },
+  en: {
+    menu: "Menu",
+    openInBrowser: "Open in Browser",
+    restartService: "Restart Service",
+    appMenuOpenDataDir: "Open Data Folder",
+    autostartToggle: "Launch at Startup",
+    quit: "Quit",
+    pluginMarket: "Plugin Market",
+    tagline: "Explore the uncharted.",
+    terminal: "Terminal",
+    diffComingSoon: "Diff (Coming Soon)",
+    files: "Files",
+    minimize: "Minimize",
+    maximize: "Maximize",
+    restore: "Restore",
+    close: "Close",
+    updateNow: "Update Now",
+    dismiss: "Dismiss",
+    startingTitle: "Starting DeepSeek Harness…",
+    preparingLocalService: "Preparing local service",
+    viewLogs: "View Logs",
+    hideLogs: "Hide Logs",
+    providerTip:
+      "First time here: DeepSeek's official models are used by default. To add OpenAI / Anthropic / " +
+      "Gemini or other providers, go to Settings → Models → Add Provider after launch — you can change this anytime.",
+    gotIt: "Got It",
+    startupFailed: "Startup Failed",
+    retry: "Retry",
+    refreshTreeTitle: "Refresh file tree and Git status",
+    collapse: "Collapse",
+    chooseWorkspaceTitle: "Choose which workspace to show in the file tree",
+    unsavedChangesTitle: "Unsaved changes",
+    revert: "Revert",
+    revertTitle: "Discard changes and revert to the last saved version",
+    save: "Save",
+    saveTitle: "Save changes (Ctrl+S)",
+    closePreviewTitle: "Close Preview",
+    restartTerminalTitle: "Restart Terminal",
+    closeTerminalTitle: "Close Terminal",
+    pluginSearchPlaceholder: "Search plugin name or description…",
+    sortByStarsTitle: "Sort by star count",
+    sortByStarsAsc: "Sort by star count, low to high",
+    sortByStarsDesc: "Sort by star count, high to low",
+    backToList: "Back to List",
+    pluginRiskTitle: "Installing third-party plugins carries risk.",
+    pluginRiskBody:
+      "Plugins run third-party code with your current user permissions — they can read local files, use your login " +
+      "credentials, and access the network. Installation isn't sandboxed, and the source repo's build scripts run " +
+      "during install too. Only install sources you trust.",
+    commandToRun: "Command to run",
+    pnpmNotFoundTitle: "pnpm not found.",
+    pnpmNotFoundBody: "Plugin installation requires pnpm — install it first to continue.",
+    installPnpmOneClick: "Install pnpm",
+    installing: "Installing…",
+    viewSource: "View Source",
+    viewSourceTitle: "View the source repository in your browser",
+    confirmInstall: "Confirm Install",
+    checkingEnvironment: "Checking environment…",
+    installLog: "Install Log",
+
+    unknownError: "Unknown error",
+    serviceStopped: (code) => `Service stopped (exit ${code}).`,
+    statusFetchFailed: (err) => `Failed to fetch status: ${err}`,
+    logReadFailed: (err) => `Failed to read log: ${err}`,
+    allCategories: "All Categories",
+    invalidResponseFormat: "Invalid response format",
+    pluginCountStatus: (shown, total, capped) =>
+      `${shown} / ${total} plugins${capped ? ` (showing first ${PLUGIN_GRID_RENDER_CAP} — search to narrow down)` : ""}`,
+    noPluginsMatched: "No matching plugins.",
+    install: "Install",
+    loadingCatalog: "Loading plugin catalog…",
+    catalogLoadFailed: (err) => `Failed to load plugin catalog: ${err}`,
+    installStartFailed: (err) => `Failed to start install: ${err}`,
+    sourceMeta: (url, stars) => `Source: ${url} · ★ ${stars}`,
+    processExited: "[process exited]",
+    terminalStartFailed: (err) => `Failed to start terminal: ${err}`,
+    installComplete: "Install complete.",
+    installFailedExit: (code) => `Install failed (exit ${code}).`,
+    pnpmInstallComplete: "pnpm installed.",
+    pnpmInstallFailedExit: (code) => `pnpm install failed (exit ${code}).`,
+    startFailed: (err) => `Failed to start: ${err}`,
+    restartFailed: (err) => `Failed to restart: ${err}`,
+    updating: "Updating…",
+    updateFailed: (err) => `Update failed: ${err}`,
+    newVersionFound: (version) => `New version ${version} available`,
+    confirmDiscardChanges: "You have unsaved changes. Discard them?",
+    cannotReadHistoricalContent: "Unable to read this file's historical content",
+    binaryFileNoPreview: "Binary file, no preview available",
+    fileTooLarge: (mb) => `File too large (${mb} MB) — preview not loaded`,
+    loading: "Loading…",
+    previewLoadFailed: (err) => `Failed to load preview: ${err}`,
+    confirmRevert: "Discard current changes and revert to the last saved version?",
+    saveFailed: (err) => `Save failed: ${err}`,
+    autoFollowWithLabel: (label) => `Auto-follow (${label})`,
+    autoFollowSession: "Auto-follow current session",
+    emptyWorkspace: "Empty workspace",
+    treeLoadFailed: (err) => `Failed to load file tree: ${err}`,
+    fileNotInKnownWorkspace: "This file doesn't belong to any known workspace",
+    dataDirLabel: (path) => `Data folder ${path}`,
+  },
+};
+
+function t(key, ...args) {
+  const entry = STRINGS[LANG][key];
+  return typeof entry === "function" ? entry(...args) : entry;
+}
+
+// Applies every data-i18n[-title|-placeholder] attribute in index.html — the
+// static markup ships with Chinese text as its own fallback (never blank),
+// so this only needs to run once, after the DOM exists, to swap in whichever
+// language LANG resolved to.
+function applyStaticTranslations() {
+  for (const el of document.querySelectorAll("[data-i18n]")) {
+    el.textContent = t(el.getAttribute("data-i18n"));
+  }
+  for (const el of document.querySelectorAll("[data-i18n-title]")) {
+    el.title = t(el.getAttribute("data-i18n-title"));
+  }
+  for (const el of document.querySelectorAll("[data-i18n-placeholder]")) {
+    el.placeholder = t(el.getAttribute("data-i18n-placeholder"));
+  }
+}
+
 // Shown once (best-effort) during the first-ever boot wait, so new users
 // discover the existing Settings → 模型 → 添加提供方 flow without us having
 // to touch the harness page itself (it's iframed content with zero IPC
@@ -116,21 +355,21 @@ async function loadLogsInto(box) {
     const lines = await invoke("get_log_tail", { n: 200 });
     box.textContent = lines.join("\n");
   } catch (err) {
-    box.textContent = `无法读取日志: ${err}`;
+    box.textContent = t("logReadFailed", err);
   }
 }
 
 function toggleLogs() {
   logsVisible = !logsVisible;
   els.logBox.classList.toggle("hidden", !logsVisible);
-  els.btnLogs.textContent = logsVisible ? "隐藏日志" : "查看日志";
+  els.btnLogs.textContent = logsVisible ? t("hideLogs") : t("viewLogs");
   if (logsVisible) loadLogsInto(els.logBox);
 }
 
 function toggleLogsStarting() {
   logsStartingVisible = !logsStartingVisible;
   els.logBoxStarting.classList.toggle("hidden", !logsStartingVisible);
-  els.btnLogsStarting.textContent = logsStartingVisible ? "隐藏日志" : "查看日志";
+  els.btnLogsStarting.textContent = logsStartingVisible ? t("hideLogs") : t("viewLogs");
   if (logsStartingVisible) loadLogsInto(els.logBoxStarting);
 }
 
@@ -144,19 +383,17 @@ function render(status) {
     case "starting":
     case "idle":
       show("starting");
-      els.startingDetail.textContent = status.detail || "准备本地服务";
+      els.startingDetail.textContent = status.detail || t("preparingLocalService");
       break;
     case "stopped":
       show("error");
       els.harnessFrame.src = "about:blank";
-      els.errorMessage.textContent =
-        `服务已停止（exit ${status.code ?? "?"}）。` +
-        (status.message ? `\n${status.message}` : "");
+      els.errorMessage.textContent = t("serviceStopped", status.code ?? "?") + (status.message ? `\n${status.message}` : "");
       break;
     case "error":
       show("error");
       els.harnessFrame.src = "about:blank";
-      els.errorMessage.textContent = status.message || "未知错误";
+      els.errorMessage.textContent = status.message || t("unknownError");
       break;
     default:
       show("starting");
@@ -169,7 +406,7 @@ async function refresh() {
     render(status);
   } catch (err) {
     show("error");
-    els.errorMessage.textContent = `无法获取状态: ${err}`;
+    els.errorMessage.textContent = t("statusFetchFailed", err);
   }
 }
 
@@ -289,7 +526,7 @@ const ICON_RESTORE =
 async function syncMaximizeIcon() {
   const maximized = await appWindow.isMaximized();
   els.btnWinMaximize.innerHTML = maximized ? ICON_RESTORE : ICON_MAXIMIZE;
-  els.btnWinMaximize.title = maximized ? "还原" : "最大化";
+  els.btnWinMaximize.title = maximized ? t("restore") : t("maximize");
 }
 
 function initWindowControls() {
@@ -548,7 +785,7 @@ async function ensureTerminal() {
     await invoke("terminal_spawn", { cols: xterm.cols || 80, rows: xterm.rows || 24 });
     terminalSpawned = true;
   } catch (err) {
-    xterm.writeln(`\r\n\x1b[31m终端启动失败: ${err}\x1b[0m`);
+    xterm.writeln(`\r\n\x1b[31m${t("terminalStartFailed", err)}\x1b[0m`);
   }
 }
 
@@ -596,7 +833,7 @@ async function loadPluginCatalog() {
     const res = await fetch(PLUGIN_CATALOG_URL);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    if (!Array.isArray(data.plugins)) throw new Error("响应格式不正确");
+    if (!Array.isArray(data.plugins)) throw new Error(t("invalidResponseFormat"));
     pluginCatalog = data;
     return data;
   })();
@@ -608,7 +845,7 @@ async function loadPluginCatalog() {
 }
 
 function pluginCatalogLang() {
-  return document.documentElement.lang?.toLowerCase().startsWith("zh") ? "zh" : "en";
+  return LANG;
 }
 
 function populateCategoryFilter(categories) {
@@ -616,7 +853,7 @@ function populateCategoryFilter(categories) {
   els.pluginMarketCategory.replaceChildren();
   const allOpt = document.createElement("option");
   allOpt.value = "";
-  allOpt.textContent = "全部分类";
+  allOpt.textContent = t("allCategories");
   els.pluginMarketCategory.appendChild(allOpt);
   for (const [id, names] of Object.entries(categories)) {
     const opt = document.createElement("option");
@@ -655,7 +892,7 @@ function togglePluginSort() {
   pluginSortDirection = pluginSortDirection === "desc" ? "asc" : "desc";
   const icon = pluginSortDirection === "asc" ? "arrow-up" : "arrow-down";
   els.pluginMarketSortIcon.querySelector("use").setAttribute("href", `#icon-${icon}`);
-  els.btnPluginMarketSort.title = pluginSortDirection === "asc" ? "按 star 数从低到高排序" : "按 star 数从高到低排序";
+  els.btnPluginMarketSort.title = pluginSortDirection === "asc" ? t("sortByStarsAsc") : t("sortByStarsDesc");
   renderPluginGrid();
 }
 
@@ -681,11 +918,14 @@ function formatStars(n) {
 function renderPluginGrid() {
   const lang = pluginCatalogLang();
   const results = filteredPlugins();
-  els.pluginMarketStatus.textContent = `${results.length} / ${pluginCatalog.plugins.length} 个插件${
-    results.length > PLUGIN_GRID_RENDER_CAP ? `（仅显示前 ${PLUGIN_GRID_RENDER_CAP} 个，请搜索缩小范围）` : ""
-  }`;
+  els.pluginMarketStatus.textContent = t(
+    "pluginCountStatus",
+    results.length,
+    pluginCatalog.plugins.length,
+    results.length > PLUGIN_GRID_RENDER_CAP
+  );
   if (results.length === 0) {
-    renderPluginGridPlaceholder("inbox", "没有匹配的插件。", false);
+    renderPluginGridPlaceholder("inbox", t("noPluginsMatched"), false);
     return;
   }
   els.pluginMarketGrid.replaceChildren();
@@ -727,7 +967,7 @@ function renderPluginGrid() {
     const btn = document.createElement("button");
     btn.className = "plugin-card-install-btn";
     btn.appendChild(iconEl("download", "icon"));
-    btn.appendChild(document.createTextNode("安装"));
+    btn.appendChild(document.createTextNode(t("install")));
     btn.addEventListener("click", () => openConfirmView(plugin));
     foot.appendChild(cat);
     foot.appendChild(btn);
@@ -758,7 +998,7 @@ function openConfirmView(plugin) {
   const lang = pluginCatalogLang();
   els.pluginConfirmName.textContent = `${plugin.owner}/${plugin.name}`;
   els.pluginConfirmDesc.textContent = plugin.description?.[lang] || plugin.description?.en || "";
-  els.pluginConfirmMeta.textContent = `来源：${plugin.url} · ★ ${formatStars(plugin.stars ?? 0)}`;
+  els.pluginConfirmMeta.textContent = t("sourceMeta", plugin.url, formatStars(plugin.stars ?? 0));
   els.pluginConfirmCmd.textContent = plugin.install;
   els.pluginMarketBrowse.classList.add("hidden");
   els.pluginMarketConfirm.classList.remove("hidden");
@@ -786,7 +1026,7 @@ function setInstallButtonState(icon, label) {
 // actually becomes available without the user having to reopen the dialog.
 async function refreshPnpmGate() {
   els.btnPluginConfirmInstall.disabled = true;
-  setInstallButtonState("loader", "正在检测环境…");
+  setInstallButtonState("loader", t("checkingEnvironment"));
   els.pluginConfirmPnpmMissing.classList.add("hidden");
   let available = false;
   try {
@@ -802,7 +1042,7 @@ async function refreshPnpmGate() {
   if (els.pluginMarketConfirm.classList.contains("hidden")) return;
   els.pluginConfirmPnpmMissing.classList.toggle("hidden", available);
   els.btnPluginConfirmInstall.disabled = !available;
-  setInstallButtonState("download", "确认安装");
+  setInstallButtonState("download", t("confirmInstall"));
 }
 
 function closeConfirmView() {
@@ -836,7 +1076,7 @@ async function openPluginMarket() {
   closeConfirmView();
   if (!pluginCatalog) {
     els.pluginMarketStatus.textContent = "";
-    renderPluginGridPlaceholder("loader", "正在加载插件目录…", true);
+    renderPluginGridPlaceholder("loader", t("loadingCatalog"), true);
   }
   try {
     const data = await loadPluginCatalog();
@@ -844,7 +1084,7 @@ async function openPluginMarket() {
     renderPluginGrid();
   } catch (err) {
     els.pluginMarketStatus.textContent = "";
-    renderPluginGridPlaceholder("alert-circle", `插件目录加载失败: ${err}`, false);
+    renderPluginGridPlaceholder("alert-circle", t("catalogLoadFailed", err), false);
   }
 }
 
@@ -881,7 +1121,7 @@ let pluginInstallButton = null;
 function resetPluginInstallButton() {
   if (!pluginInstallButton) return;
   pluginInstallButton.disabled = false;
-  setInstallButtonState("download", "确认安装");
+  setInstallButtonState("download", t("confirmInstall"));
   pluginInstallButton = null;
 }
 
@@ -893,14 +1133,14 @@ async function installConfirmedPlugin() {
   if (!plugin) return;
   const pkg = packageFromInstallCommand(plugin.install);
   els.btnPluginConfirmInstall.disabled = true;
-  setInstallButtonState("loader", "安装中…");
+  setInstallButtonState("loader", t("installing"));
   pluginInstallButton = els.btnPluginConfirmInstall;
   showPluginInstallLog();
   appendPluginInstallLog(`$ dsh plugin --profile web add ${pkg}`);
   try {
     await invoke("install_plugin", { package: pkg });
   } catch (err) {
-    appendPluginInstallLog(`启动安装失败: ${err}`);
+    appendPluginInstallLog(t("installStartFailed", err));
     resetPluginInstallButton();
   }
   // On success, re-enabling the button happens in the "plugin-install"
@@ -925,7 +1165,7 @@ function setPnpmButtonBusy(busy) {
     .querySelector("use")
     .setAttribute("href", busy ? "#icon-loader" : "#icon-download");
   els.btnPluginInstallPnpmIcon.classList.toggle("icon-spin", busy);
-  els.btnPluginInstallPnpmLabel.textContent = busy ? "安装中…" : "一键安装 pnpm";
+  els.btnPluginInstallPnpmLabel.textContent = busy ? t("installing") : t("installPnpmOneClick");
 }
 
 function resetPnpmInstallButton() {
@@ -948,7 +1188,7 @@ async function installPnpm() {
   try {
     await invoke("install_pnpm");
   } catch (err) {
-    appendPluginInstallLog(`启动安装失败: ${err}`);
+    appendPluginInstallLog(t("installStartFailed", err));
     resetPnpmInstallButton();
   }
   // On success, re-enabling the button and re-probing pnpm both happen in
@@ -1221,7 +1461,7 @@ function setDirty(dirty) {
 // replacing the editor.
 function confirmDiscardIfNeeded() {
   if (!isDirty()) return true;
-  return confirm("有未保存的改动，确定要放弃吗？");
+  return confirm(t("confirmDiscardChanges"));
 }
 
 function destroyEditor() {
@@ -1249,7 +1489,7 @@ function mountEditor(path, preview) {
   if (preview.current === null) {
     const originalText = contentTextOrNull(preview.original);
     if (originalText === null) {
-      els.panelPreviewBody.textContent = "无法读取此文件的历史内容";
+      els.panelPreviewBody.textContent = t("cannotReadHistoricalContent");
       return;
     }
     const extensions = [CM.basicSetup, ...buildCodeMirrorBaseExtensions(), CM.EditorState.readOnly.of(true)];
@@ -1262,11 +1502,11 @@ function mountEditor(path, preview) {
 
   const current = preview.current;
   if (current.kind === "binary") {
-    els.panelPreviewBody.textContent = "二进制文件，无法预览";
+    els.panelPreviewBody.textContent = t("binaryFileNoPreview");
     return;
   }
   if (current.kind === "tooLarge") {
-    els.panelPreviewBody.textContent = `文件过大（${(current.bytes / 1024 / 1024).toFixed(1)} MB），未加载预览`;
+    els.panelPreviewBody.textContent = t("fileTooLarge", (current.bytes / 1024 / 1024).toFixed(1));
     return;
   }
   if (current.kind === "error") {
@@ -1309,7 +1549,7 @@ async function showPreview(path) {
   els.panelPreviewBody.replaceChildren();
   const loading = document.createElement("p");
   loading.className = "muted panel-empty";
-  loading.textContent = "加载中…";
+  loading.textContent = t("loading");
   els.panelPreviewBody.appendChild(loading);
 
   try {
@@ -1321,7 +1561,7 @@ async function showPreview(path) {
     mountEditor(path, preview);
   } catch (err) {
     if (currentPreviewPath !== path) return;
-    els.panelPreviewBody.textContent = `预览加载失败: ${err}`;
+    els.panelPreviewBody.textContent = t("previewLoadFailed", err);
   }
 }
 
@@ -1364,7 +1604,7 @@ function closePreview() {
 
 function revertCurrentEdit() {
   if (!currentEditorView || currentSavedContent === null) return;
-  if (!confirm("放弃当前改动，还原为上次保存的内容？")) return;
+  if (!confirm(t("confirmRevert"))) return;
   currentEditorView.dispatch({
     changes: { from: 0, to: currentEditorView.state.doc.length, insert: currentSavedContent },
   });
@@ -1390,7 +1630,7 @@ async function saveCurrentEdit() {
   } catch (err) {
     // Left exactly as the user typed it on failure — nothing is discarded
     // on a failed write.
-    alert(`保存失败: ${err}`);
+    alert(t("saveFailed", err));
   } finally {
     els.btnPreviewSave.disabled = false;
   }
@@ -1405,7 +1645,7 @@ function renderWorkspaceOptions(knownWorkspaces, autoLabel) {
 
   const autoOption = document.createElement("option");
   autoOption.value = AUTO_OPTION_VALUE;
-  autoOption.textContent = autoLabel ? `自动跟随（${autoLabel}）` : "自动跟随当前会话";
+  autoOption.textContent = autoLabel ? t("autoFollowWithLabel", autoLabel) : t("autoFollowSession");
   select.appendChild(autoOption);
 
   let lockedValueFound = lockedWorkspace === null;
@@ -1470,7 +1710,7 @@ async function refreshTreeAndGitStatus() {
     if (tree.length === 0) {
       const empty = document.createElement("p");
       empty.className = "muted panel-empty";
-      empty.textContent = "空工作区";
+      empty.textContent = t("emptyWorkspace");
       els.panelTree.appendChild(empty);
     } else {
       for (const entry of tree) {
@@ -1478,7 +1718,7 @@ async function refreshTreeAndGitStatus() {
       }
     }
   } catch (err) {
-    els.panelTree.textContent = `无法加载文件树: ${err}`;
+    els.panelTree.textContent = t("treeLoadFailed", err);
   }
 }
 
@@ -1582,7 +1822,7 @@ async function handleFileMention(absPath) {
     els.panelPreviewTitle.textContent = absPath;
     els.panelPreviewTitle.title = absPath;
     els.cardFile.classList.remove("hidden");
-    els.panelPreviewBody.textContent = "该文件不属于任何已知工作区";
+    els.panelPreviewBody.textContent = t("fileNotInKnownWorkspace");
     return;
   }
 
@@ -1617,6 +1857,7 @@ window.addEventListener("message", (event) => {
 // ── init ─────────────────────────────────────────────────────────────────
 
 async function init() {
+  applyStaticTranslations();
   applyPanelWidth();
   initResizeHandle();
   applyCardFileHeight();
@@ -1637,7 +1878,7 @@ async function init() {
     const bits = [];
     if (info.dshVersion) bits.push(`dsh ${info.dshVersion}`);
     if (info.nodePath) bits.push(`Node ${info.nodePath}`);
-    if (info.dshHome) bits.push(`数据目录 ${info.dshHome}`);
+    if (info.dshHome) bits.push(t("dataDirLabel", info.dshHome));
     els.footer.textContent = bits.join(" · ");
   } catch {
     /* footer is cosmetic */
@@ -1647,14 +1888,14 @@ async function init() {
   listen("terminal-data", (event) => xterm?.write(base64ToBytes(event.payload)));
   listen("terminal-exit", () => {
     terminalSpawned = false;
-    xterm?.writeln("\r\n\x1b[90m[进程已结束]\x1b[0m");
+    xterm?.writeln(`\r\n\x1b[90m${t("processExited")}\x1b[0m`);
   });
   listen("plugin-install", (event) => {
     const payload = event.payload;
     if (payload.state === "line") {
       appendPluginInstallLog(payload.text);
     } else if (payload.state === "done") {
-      appendPluginInstallLog(payload.success ? "安装完成。" : `安装失败（exit ${payload.code ?? "?"}）。`);
+      appendPluginInstallLog(payload.success ? t("installComplete") : t("installFailedExit", payload.code ?? "?"));
       resetPluginInstallButton();
     }
   });
@@ -1663,7 +1904,7 @@ async function init() {
     if (payload.state === "line") {
       appendPluginInstallLog(payload.text);
     } else if (payload.state === "done") {
-      appendPluginInstallLog(payload.success ? "pnpm 安装完成。" : `pnpm 安装失败（exit ${payload.code ?? "?"}）。`);
+      appendPluginInstallLog(payload.success ? t("pnpmInstallComplete") : t("pnpmInstallFailedExit", payload.code ?? "?"));
       resetPnpmInstallButton();
       // Re-probe regardless of success/failure — cheap, and covers the case
       // where npm reported non-zero but pnpm actually ended up on PATH
@@ -1675,7 +1916,7 @@ async function init() {
     els.btnRetry.disabled = true;
     invoke("start_server")
       .catch((err) => {
-        els.errorMessage.textContent = `启动失败: ${err}`;
+        els.errorMessage.textContent = t("startFailed", err);
       })
       .finally(() => {
         els.btnRetry.disabled = false;
@@ -1685,7 +1926,7 @@ async function init() {
     els.btnRestart.disabled = true;
     invoke("restart_server")
       .catch((err) => {
-        els.errorMessage.textContent = `重启失败: ${err}`;
+        els.errorMessage.textContent = t("restartFailed", err);
       })
       .finally(() => {
         els.btnRestart.disabled = false;
@@ -1770,15 +2011,15 @@ async function init() {
   });
   els.btnUpdateInstall.addEventListener("click", () => {
     els.btnUpdateInstall.disabled = true;
-    els.btnUpdateInstall.textContent = "正在更新…";
+    els.btnUpdateInstall.textContent = t("updating");
     els.btnUpdateDismiss.disabled = true;
     // On success this relaunches the app (the window disappears); a caught
     // error means the update didn't apply, so restore the button for retry.
     invoke("install_update").catch((err) => {
       els.btnUpdateInstall.disabled = false;
-      els.btnUpdateInstall.textContent = "立即更新";
+      els.btnUpdateInstall.textContent = t("updateNow");
       els.btnUpdateDismiss.disabled = false;
-      els.updateText.textContent = `更新失败: ${err}`;
+      els.updateText.textContent = t("updateFailed", err);
     });
   });
   checkForUpdate();
@@ -1793,7 +2034,7 @@ async function checkForUpdate() {
   try {
     const update = await invoke("check_for_update");
     if (!update) return;
-    els.updateText.textContent = `发现新版本 ${update.version}`;
+    els.updateText.textContent = t("newVersionFound", update.version);
     els.updateBanner.classList.remove("hidden");
   } catch {
     /* update check is best-effort; silent failure keeps the boot page usable offline */

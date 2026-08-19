@@ -13,6 +13,8 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Wry};
 use tauri_plugin_autostart::ManagerExt;
 
+use crate::i18n;
+
 pub const MENU_OPEN_BROWSER: &str = "open_browser";
 pub const MENU_RESTART: &str = "restart";
 pub const MENU_OPEN_DATA_DIR: &str = "open_data_dir";
@@ -23,6 +25,7 @@ pub const MENU_QUIT: &str = "quit";
 /// macOS-only — see the `set_menu()` callsite in lib.rs for why.
 #[cfg(target_os = "macos")]
 pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
+    let lang = i18n::detect();
     // The first submenu becomes the macOS application menu (its name is
     // replaced by the app name). It must carry the standard roles — the
     // Quit role in particular is what binds ⌘Q (key equivalent "q" + the
@@ -43,20 +46,27 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             &PredefinedMenuItem::quit(app, None)?,
         ],
     )?;
-    let open_browser = MenuItem::with_id(app, MENU_OPEN_BROWSER, "在浏览器中打开", true, None::<&str>)?;
-    let restart = MenuItem::with_id(app, MENU_RESTART, "重启服务", true, None::<&str>)?;
-    let open_data_dir = MenuItem::with_id(app, MENU_OPEN_DATA_DIR, "打开数据目录 (~/.dsh)", true, None::<&str>)?;
+    let open_browser = MenuItem::with_id(app, MENU_OPEN_BROWSER, i18n::tr(lang, "在浏览器中打开", "Open in Browser"), true, None::<&str>)?;
+    let restart = MenuItem::with_id(app, MENU_RESTART, i18n::tr(lang, "重启服务", "Restart Service"), true, None::<&str>)?;
+    let open_data_dir = MenuItem::with_id(
+        app,
+        MENU_OPEN_DATA_DIR,
+        i18n::tr(lang, "打开数据目录 (~/.dsh)", "Open Data Folder (~/.dsh)"),
+        true,
+        None::<&str>,
+    )?;
     // The custom "退出" item is gone: the app menu's standard Quit role
     // covers quitting (with the ⌘Q shortcut), and tearing the server down
     // happens once in lib.rs's ExitRequested handler for every quit path.
-    let file = Submenu::with_items(app, "文件", true, &[&open_browser, &restart, &open_data_dir])?;
+    let file = Submenu::with_items(app, i18n::tr(lang, "文件", "File"), true, &[&open_browser, &restart, &open_data_dir])?;
     // macOS 上 Cmd+C / Cmd+V / Cmd+X / Cmd+A 等快捷键必须由菜单中的标准
     // "编辑"项提供（通过 responder chain 分发到 WebView），缺少它们会导致
     // 剪切/复制/粘贴失效。PredefinedMenuItem 的角色项会自动带上正确的
-    // 快捷键与选择器，无需手动注册处理逻辑。
+    // 快捷键与选择器，无需手动注册处理逻辑。它们自身的文本由 AppKit 按系统
+    // 语言自动本地化，这里不需要（也不能）手动翻译。
     let edit = Submenu::with_items(
         app,
-        "编辑",
+        i18n::tr(lang, "编辑", "Edit"),
         true,
         &[
             &PredefinedMenuItem::undo(app, None)?,
@@ -73,7 +83,7 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     // those shortcuts are dead for the same reason ⌘Q was.
     let window = Submenu::with_items(
         app,
-        "窗口",
+        i18n::tr(lang, "窗口", "Window"),
         true,
         &[
             &PredefinedMenuItem::minimize(app, None)?,
@@ -94,23 +104,30 @@ pub fn build_tray(
     app: &AppHandle,
     on_action: impl Fn(&AppHandle, &str) + Send + Sync + 'static,
 ) -> tauri::Result<CheckMenuItem<Wry>> {
-    let show = MenuItem::with_id(app, MENU_SHOW_WINDOW, "显示窗口", true, None::<&str>)?;
-    let open_browser = MenuItem::with_id(app, MENU_OPEN_BROWSER, "在浏览器中打开", true, None::<&str>)?;
-    let restart = MenuItem::with_id(app, MENU_RESTART, "重启服务", true, None::<&str>)?;
+    let lang = i18n::detect();
+    let show = MenuItem::with_id(app, MENU_SHOW_WINDOW, i18n::tr(lang, "显示窗口", "Show Window"), true, None::<&str>)?;
+    let open_browser = MenuItem::with_id(app, MENU_OPEN_BROWSER, i18n::tr(lang, "在浏览器中打开", "Open in Browser"), true, None::<&str>)?;
+    let restart = MenuItem::with_id(app, MENU_RESTART, i18n::tr(lang, "重启服务", "Restart Service"), true, None::<&str>)?;
     // On Windows/Linux this tray is the *only* menu (see the `set_menu()`
     // callsite in lib.rs) — include everything the removed window menu
     // offered, not just what macOS's menu bar leaves uncovered.
-    let open_data_dir = MenuItem::with_id(app, MENU_OPEN_DATA_DIR, "打开数据目录 (~/.dsh)", true, None::<&str>)?;
+    let open_data_dir = MenuItem::with_id(
+        app,
+        MENU_OPEN_DATA_DIR,
+        i18n::tr(lang, "打开数据目录 (~/.dsh)", "Open Data Folder (~/.dsh)"),
+        true,
+        None::<&str>,
+    )?;
     let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
     let autostart = CheckMenuItem::with_id(
         app,
         MENU_TOGGLE_AUTOSTART,
-        "开机自动启动",
+        i18n::tr(lang, "开机自动启动", "Launch at Startup"),
         true,
         autostart_enabled,
         None::<&str>,
     )?;
-    let quit = MenuItem::with_id(app, MENU_QUIT, "退出", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, MENU_QUIT, i18n::tr(lang, "退出", "Quit"), true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &open_browser, &restart, &open_data_dir, &autostart, &quit])?;
 
     // Shared between on_menu_event and on_tray_icon_event below (a left

@@ -30,6 +30,8 @@ use std::os::windows::process::CommandExt as _;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::i18n::{self, Lang};
+
 /// Tray icon id, shared with `menu::build_tray`'s `TrayIconBuilder::with_id`
 /// so `set_status` can look the tray up by id to update its tooltip.
 pub const TRAY_ID: &str = "main-tray";
@@ -139,12 +141,13 @@ pub type Shared = Arc<Mutex<DshServer>>;
 /// opening the window. Kept short (tray tooltips are single-line on most
 /// platforms) rather than reusing the boot page's more detailed messages.
 fn tray_tooltip_text(status: &ServerStatus) -> String {
+    let lang = i18n::detect();
     let detail = match status {
-        ServerStatus::Idle => "空闲",
-        ServerStatus::Starting { .. } => "启动中…",
-        ServerStatus::Running { .. } => "运行中",
-        ServerStatus::Stopped { .. } => "已停止",
-        ServerStatus::Error { .. } => "⚠ 出错",
+        ServerStatus::Idle => i18n::tr(lang, "空闲", "Idle"),
+        ServerStatus::Starting { .. } => i18n::tr(lang, "启动中…", "Starting…"),
+        ServerStatus::Running { .. } => i18n::tr(lang, "运行中", "Running"),
+        ServerStatus::Stopped { .. } => i18n::tr(lang, "已停止", "Stopped"),
+        ServerStatus::Error { .. } => i18n::tr(lang, "⚠ 出错", "⚠ Error"),
     };
     format!("DeepSeek Harness — {detail}")
 }
@@ -348,11 +351,16 @@ pub(crate) fn kill_process_tree(pid: u32) {
 // ── resolution ───────────────────────────────────────────────────────────────
 
 fn resolve_node(app: &AppHandle) -> Result<String, String> {
+    let lang = i18n::detect();
     if let Some(node) = env_nonempty("DSH_DESKTOP_NODE") {
         if Path::new(&node).exists() {
             return Ok(plain_win_path(Path::new(&node)));
         }
-        return Err(format!("DSH_DESKTOP_NODE 指向的文件不存在: {node}"));
+        return Err(if lang == Lang::En {
+            format!("DSH_DESKTOP_NODE points to a file that doesn't exist: {node}")
+        } else {
+            format!("DSH_DESKTOP_NODE 指向的文件不存在: {node}")
+        });
     }
     // bundled runtime shipped with packaged builds
     if let Ok(res) = app.path().resource_dir() {
@@ -367,22 +375,31 @@ fn resolve_node(app: &AppHandle) -> Result<String, String> {
     hide_console(&mut probe);
     match probe.output() {
         Ok(out) if out.status.success() => Ok("node".to_string()),
-        _ => Err(
+        _ => Err(if lang == Lang::En {
+            "Node.js not detected. Install Node.js (https://nodejs.org), or set the \
+             DSH_DESKTOP_NODE environment variable to the path of node.exe."
+                .to_string()
+        } else {
             "未检测到 Node.js：请安装 Node.js（https://nodejs.org），\
              或在环境变量 DSH_DESKTOP_NODE 中指定 node.exe 的路径。"
-                .to_string(),
-        ),
+                .to_string()
+        }),
     }
 }
 
 fn resolve_bin(app: &AppHandle, server: &Shared) -> Result<String, String> {
+    let lang = i18n::detect();
     if let Some(bin) = env_nonempty("DSH_DESKTOP_DSH_BIN") {
         let p = PathBuf::from(&bin);
         if p.exists() {
             push_log(server, format!("使用 DSH_DESKTOP_DSH_BIN: {bin}"));
             return Ok(plain_win_path(&p));
         }
-        return Err(format!("DSH_DESKTOP_DSH_BIN 指向的文件不存在: {bin}"));
+        return Err(if lang == Lang::En {
+            format!("DSH_DESKTOP_DSH_BIN points to a file that doesn't exist: {bin}")
+        } else {
+            format!("DSH_DESKTOP_DSH_BIN 指向的文件不存在: {bin}")
+        });
     }
     // bundled runtime shipped with packaged builds
     if let Ok(res) = app.path().resource_dir() {
@@ -397,21 +414,36 @@ fn resolve_bin(app: &AppHandle, server: &Shared) -> Result<String, String> {
         install_runtime(app, server, &rd)?;
     }
     if !bin.exists() {
-        return Err(format!("dsh 运行时安装失败（{}），请查看日志。", rd.display()));
+        return Err(if lang == Lang::En {
+            format!("dsh runtime installation failed ({}). Check the logs.", rd.display())
+        } else {
+            format!("dsh 运行时安装失败（{}），请查看日志。", rd.display())
+        });
     }
     Ok(plain_win_path(&bin))
 }
 
 fn install_runtime(app: &AppHandle, server: &Shared, rd: &Path) -> Result<(), String> {
+    let lang = i18n::detect();
     let version = env_nonempty("DSH_DESKTOP_DSH_VERSION").unwrap_or_else(|| DSH_VERSION_DEFAULT.to_string());
     let target = format!("@deepseek-ai/dsh@{version}");
-    fs::create_dir_all(rd).map_err(|e| format!("无法创建运行时目录 {}: {e}", rd.display()))?;
+    fs::create_dir_all(rd).map_err(|e| {
+        if lang == Lang::En {
+            format!("Failed to create runtime directory {}: {e}", rd.display())
+        } else {
+            format!("无法创建运行时目录 {}: {e}", rd.display())
+        }
+    })?;
     push_log(server, format!("首次使用：安装 dsh 运行时 ({target}) → {}", rd.display()));
     set_status(
         app,
         server,
         ServerStatus::Starting {
-            detail: format!("安装 dsh 运行时 ({version})…"),
+            detail: if lang == Lang::En {
+                format!("Installing dsh runtime ({version})…")
+            } else {
+                format!("安装 dsh 运行时 ({version})…")
+            },
         },
     );
     let prefix = plain_win_path(rd);
@@ -429,11 +461,13 @@ fn install_runtime(app: &AppHandle, server: &Shared, rd: &Path) -> Result<(), St
         "--fetch-retry-mintimeout=2000",
     ]);
     own_process_group(&mut cmd);
-    let mut output = cmd
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("无法运行 npm install: {e}"))?;
+    let mut output = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| {
+        if lang == Lang::En {
+            format!("Failed to run npm install: {e}")
+        } else {
+            format!("无法运行 npm install: {e}")
+        }
+    })?;
 
     // Stream npm output into the log ring buffer so first-run installs
     // (hundreds of MB) are visible instead of silent.
@@ -468,7 +502,11 @@ fn install_runtime(app: &AppHandle, server: &Shared, rd: &Path) -> Result<(), St
                 // taskkill whatever unrelated process the OS has since
                 // reused that PID number for.
                 server.lock().unwrap().install_pid = None;
-                return Err(format!("npm install 进程错误: {e}"));
+                return Err(if lang == Lang::En {
+                    format!("npm install process error: {e}")
+                } else {
+                    format!("npm install 进程错误: {e}")
+                });
             }
         }
     };
@@ -477,7 +515,11 @@ fn install_runtime(app: &AppHandle, server: &Shared, rd: &Path) -> Result<(), St
         s.install_pid = None;
     }
     if !status.success() {
-        return Err(format!("npm install 失败（exit {:?}），请查看日志。", status.code()));
+        return Err(if lang == Lang::En {
+            format!("npm install failed (exit {:?}). Check the logs.", status.code())
+        } else {
+            format!("npm install 失败（exit {:?}），请查看日志。", status.code())
+        });
     }
     Ok(())
 }
@@ -516,10 +558,16 @@ pub enum PluginInstallEvent {
 /// disabled state is a UX nicety on top of this, not a substitute for it —
 /// this guard is what actually makes it safe.
 pub fn install_plugin(app: &AppHandle, server: &Shared, package: &str) -> Result<(), String> {
+    let lang = i18n::detect();
     {
         let mut s = server.lock().unwrap();
         if s.plugin_install_pid.is_some() {
-            return Err("已有插件正在安装，请等待完成后再试。".to_string());
+            return Err(i18n::tr(
+                lang,
+                "已有插件正在安装，请等待完成后再试。",
+                "A plugin install is already in progress — wait for it to finish first.",
+            )
+            .to_string());
         }
         // Reserved with a placeholder before resolve_node/resolve_bin (which
         // can themselves install the runtime and take a while) so a second
@@ -556,7 +604,11 @@ pub fn install_plugin(app: &AppHandle, server: &Shared, package: &str) -> Result
         Ok(c) => c,
         Err(e) => {
             server.lock().unwrap().plugin_install_pid = None;
-            return Err(format!("无法运行 dsh plugin add: {e}"));
+            return Err(if lang == Lang::En {
+                format!("Failed to run dsh plugin add: {e}")
+            } else {
+                format!("无法运行 dsh plugin add: {e}")
+            });
         }
     };
 
@@ -638,10 +690,16 @@ pub enum PnpmInstallEvent {
 /// bare form spawned fine on other platforms but failed outright here with
 /// a raw "program not found" the confirm view had no way to explain.
 pub fn install_pnpm(app: &AppHandle, server: &Shared) -> Result<(), String> {
+    let lang = i18n::detect();
     {
         let mut s = server.lock().unwrap();
         if s.pnpm_install_pid.is_some() {
-            return Err("pnpm 正在安装，请等待完成后再试。".to_string());
+            return Err(i18n::tr(
+                lang,
+                "pnpm 正在安装，请等待完成后再试。",
+                "pnpm is already being installed — wait for it to finish first.",
+            )
+            .to_string());
         }
         s.pnpm_install_pid = Some(0);
     }
@@ -655,9 +713,11 @@ pub fn install_pnpm(app: &AppHandle, server: &Shared) -> Result<(), String> {
         Ok(c) => c,
         Err(e) => {
             server.lock().unwrap().pnpm_install_pid = None;
-            return Err(format!(
-                "无法运行 npm install -g pnpm: {e}（请确认系统已安装 Node.js/npm）"
-            ));
+            return Err(if lang == Lang::En {
+                format!("Failed to run npm install -g pnpm: {e} (make sure Node.js/npm is installed)")
+            } else {
+                format!("无法运行 npm install -g pnpm: {e}（请确认系统已安装 Node.js/npm）")
+            });
         }
     };
 
@@ -961,9 +1021,16 @@ pub(crate) fn workspace_dir(app: &AppHandle) -> PathBuf {
 
 /// Spawn the server process and start its reader/exit-watcher threads.
 fn spawn(app: &AppHandle, server: &Shared, node: &str, bin: &str, port: u16) -> Result<(), String> {
+    let lang = i18n::detect();
     let cwd = workspace_dir(app);
     let cwd_plain = plain_win_path(&cwd);
-    fs::create_dir_all(&cwd).map_err(|e| format!("无法创建工作目录 {}: {e}", cwd.display()))?;
+    fs::create_dir_all(&cwd).map_err(|e| {
+        if lang == Lang::En {
+            format!("Failed to create working directory {}: {e}", cwd.display())
+        } else {
+            format!("无法创建工作目录 {}: {e}", cwd.display())
+        }
+    })?;
 
     push_log(
         server,
@@ -980,7 +1047,13 @@ fn spawn(app: &AppHandle, server: &Shared, node: &str, bin: &str, port: u16) -> 
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     own_process_group(&mut cmd);
     hide_console(&mut cmd);
-    let mut child = cmd.spawn().map_err(|e| format!("启动 dsh 失败: {e}"))?;
+    let mut child = cmd.spawn().map_err(|e| {
+        if lang == Lang::En {
+            format!("Failed to start dsh: {e}")
+        } else {
+            format!("启动 dsh 失败: {e}")
+        }
+    })?;
 
     let pid = child.id();
     println!("[dsh-desktop] spawned dsh pid {pid} on port {port}");
@@ -995,7 +1068,11 @@ fn spawn(app: &AppHandle, server: &Shared, node: &str, bin: &str, port: u16) -> 
         app,
         server,
         ServerStatus::Starting {
-            detail: format!("服务启动中 (端口 {port})…"),
+            detail: if lang == Lang::En {
+                format!("Service starting (port {port})…")
+            } else {
+                format!("服务启动中 (端口 {port})…")
+            },
         },
     );
 
@@ -1083,14 +1160,22 @@ fn spawn(app: &AppHandle, server: &Shared, node: &str, bin: &str, port: u16) -> 
                 &app3,
                 &srv4,
                 ServerStatus::Error {
-                    message: format!("dsh 服务异常退出 (exit {code:?})，1 秒后自动重启…"),
+                    message: if lang == Lang::En {
+                        format!("dsh service exited unexpectedly (exit {code:?}) — restarting automatically in 1s…")
+                    } else {
+                        format!("dsh 服务异常退出 (exit {code:?})，1 秒后自动重启…")
+                    },
                 },
             );
             thread::sleep(Duration::from_secs(1));
             let _ = start(&app3, &srv4);
         } else {
             let status = ServerStatus::Error {
-                message: format!("dsh 服务异常退出 (exit {code:?})，自动重启已停止，请手动重试。"),
+                message: if lang == Lang::En {
+                    format!("dsh service exited unexpectedly (exit {code:?}). Automatic restart has stopped — retry manually.")
+                } else {
+                    format!("dsh 服务异常退出 (exit {code:?})，自动重启已停止，请手动重试。")
+                },
             };
             {
                 let mut s = srv4.lock().unwrap();
@@ -1162,6 +1247,7 @@ pub fn start(app: &AppHandle, server: &Shared) -> Result<(), String> {
 }
 
 fn start_inner(app: &AppHandle, server: &Shared) -> Result<(), String> {
+    let lang = i18n::detect();
     // Attach to an already-running harness on the default port instead of
     // spawning a second instance (two servers would race on ~/.dsh). This
     // happens before resolving node/runtime so attach mode needs nothing.
@@ -1222,7 +1308,7 @@ fn start_inner(app: &AppHandle, server: &Shared) -> Result<(), String> {
                 app,
                 server,
                 ServerStatus::Starting {
-                    detail: "确认 3080 端口占用情况…".to_string(),
+                    detail: i18n::tr(lang, "确认 3080 端口占用情况…", "Checking what's using port 3080…").to_string(),
                 },
             );
             if probe_dsh_with_retries(&default_url, 3, 400) {
@@ -1259,7 +1345,12 @@ fn start_inner(app: &AppHandle, server: &Shared) -> Result<(), String> {
                 app,
                 server,
                 ServerStatus::Error {
-                    message: "启动超时：dsh 进程仍在运行，但未能确认服务已就绪，请查看日志。".to_string(),
+                    message: i18n::tr(
+                        lang,
+                        "启动超时：dsh 进程仍在运行，但未能确认服务已就绪，请查看日志。",
+                        "Startup timed out: the dsh process is still running, but readiness couldn't be confirmed. Check the logs.",
+                    )
+                    .to_string(),
                 },
             );
             return Ok(());
@@ -1277,7 +1368,7 @@ pub fn info(app: &AppHandle, server: &Shared) -> serde_json::Value {
     let dsh_version = env_nonempty("DSH_DESKTOP_DSH_VERSION").unwrap_or_else(|| DSH_VERSION_DEFAULT.to_string());
     serde_json::json!({
         "dshVersion": dsh_version,
-        "nodePath": node.unwrap_or_else(|| "未检测到".to_string()),
+        "nodePath": node.unwrap_or_else(|| i18n::tr(i18n::detect(), "未检测到", "Not detected").to_string()),
         "binPath": bin.unwrap_or_default(),
         "dshHome": dsh_home_dir(app).to_string_lossy(),
         "runtimeDir": runtime_dir(app).to_string_lossy(),

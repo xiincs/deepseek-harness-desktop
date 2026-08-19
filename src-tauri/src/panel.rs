@@ -401,15 +401,20 @@ pub fn editable_preview(root: &Path, rel_path: &str) -> EditablePreview {
 /// `save_file`'s round-trip verification and any other consumer that just
 /// wants "what does this file currently contain" reaches for.
 pub fn text_preview(root: &Path, rel_path: &str) -> FileContent {
+    let lang = crate::i18n::detect();
     let full_path = root.join(rel_path);
     let Ok(metadata) = fs::metadata(&full_path) else {
-        return FileContent::Error { message: "文件不存在".to_string() };
+        return FileContent::Error {
+            message: crate::i18n::tr(lang, "文件不存在", "File does not exist").to_string(),
+        };
     };
     if metadata.len() > MAX_PREVIEW_BYTES {
         return FileContent::TooLarge { bytes: metadata.len() };
     }
     let Ok(bytes) = fs::read(&full_path) else {
-        return FileContent::Error { message: "无法读取文件".to_string() };
+        return FileContent::Error {
+            message: crate::i18n::tr(lang, "无法读取文件", "Unable to read file").to_string(),
+        };
     };
     // A NUL byte anywhere is a cheap, reliable-enough binary heuristic —
     // the same one git itself uses to decide whether a file diffs as text.
@@ -457,11 +462,24 @@ fn git_show_head(root: &Path, rel_path: &str) -> Option<FileContent> {
 /// where the same class of bug would only misdirect a preview rather than
 /// overwrite a file outside the workspace.
 fn resolve_within_root(root: &Path, rel_path: &str) -> Result<PathBuf, String> {
+    let lang = crate::i18n::detect();
     let candidate = root.join(rel_path);
-    let root_canon = root.canonicalize().map_err(|e| format!("无法解析工作区路径: {e}"))?;
-    let candidate_canon = candidate.canonicalize().map_err(|e| format!("无法解析文件路径: {e}"))?;
+    let root_canon = root.canonicalize().map_err(|e| {
+        if lang == crate::i18n::Lang::En {
+            format!("Failed to resolve workspace path: {e}")
+        } else {
+            format!("无法解析工作区路径: {e}")
+        }
+    })?;
+    let candidate_canon = candidate.canonicalize().map_err(|e| {
+        if lang == crate::i18n::Lang::En {
+            format!("Failed to resolve file path: {e}")
+        } else {
+            format!("无法解析文件路径: {e}")
+        }
+    })?;
     if !candidate_canon.starts_with(&root_canon) {
-        return Err("路径超出工作区范围".to_string());
+        return Err(crate::i18n::tr(lang, "路径超出工作区范围", "Path is outside the workspace").to_string());
     }
     Ok(candidate_canon)
 }
@@ -471,8 +489,15 @@ fn resolve_within_root(root: &Path, rel_path: &str) -> Result<PathBuf, String> {
 /// exist) — this is an edit-and-save path for a file the tree already
 /// listed, not a general file-creation API.
 pub fn save_file(root: &Path, rel_path: &str, content: &str) -> Result<(), String> {
+    let lang = crate::i18n::detect();
     let full_path = resolve_within_root(root, rel_path)?;
-    fs::write(&full_path, content).map_err(|e| format!("保存失败: {e}"))
+    fs::write(&full_path, content).map_err(|e| {
+        if lang == crate::i18n::Lang::En {
+            format!("Save failed: {e}")
+        } else {
+            format!("保存失败: {e}")
+        }
+    })
 }
 
 #[cfg(test)]

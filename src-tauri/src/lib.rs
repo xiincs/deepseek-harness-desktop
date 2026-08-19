@@ -6,6 +6,7 @@
 //! is not enabled. All shell actions go through the native menu/tray and the
 //! local boot page.
 
+mod i18n;
 mod menu;
 mod panel;
 mod server;
@@ -224,7 +225,7 @@ fn open_in_browser(app: AppHandle, state: State<'_, AppState>) -> Result<(), Str
 #[tauri::command]
 fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
     if !url.starts_with("https://github.com/") {
-        return Err("仅支持打开 GitHub 仓库链接。".to_string());
+        return Err(i18n::tr(i18n::detect(), "仅支持打开 GitHub 仓库链接。", "Only GitHub repository links can be opened.").to_string());
     }
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
@@ -279,7 +280,7 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
         .check()
         .await
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "没有可用的更新".to_string())?;
+        .ok_or_else(|| i18n::tr(i18n::detect(), "没有可用的更新", "No update available").to_string())?;
     update
         .download_and_install(|_, _| {}, || {})
         .await
@@ -914,11 +915,16 @@ pub fn run() {
                 if state.hide_notice_shown.swap(true, Ordering::Relaxed) {
                     return;
                 }
+                let lang = i18n::detect();
                 let _ = app
                     .notification()
                     .builder()
-                    .title("DeepSeek Harness 已转入后台")
-                    .body("服务仍在运行；从系统托盘图标可重新打开窗口或退出。")
+                    .title(i18n::tr(lang, "DeepSeek Harness 已转入后台", "DeepSeek Harness is running in the background"))
+                    .body(i18n::tr(
+                        lang,
+                        "服务仍在运行；从系统托盘图标可重新打开窗口或退出。",
+                        "The service is still running. Use the tray icon to reopen the window or quit.",
+                    ))
                     .show();
             }
         })
