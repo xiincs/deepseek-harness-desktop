@@ -546,6 +546,14 @@ function initAppMenu() {
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && isAppMenuOpen()) closeAppMenu();
   });
+  // #harness-frame covers virtually the whole window below the toolbar, and
+  // a click landing inside it fires in that iframe's own document — it
+  // never bubbles to the listener above. But clicking into an iframe always
+  // shifts focus into its content window first, which fires "blur" on the
+  // top-level window, so that's the signal this actually listens for.
+  window.addEventListener("blur", () => {
+    if (isAppMenuOpen()) closeAppMenu();
+  });
 }
 
 // ── window chrome (per-platform) ────────────────────────────────────────
