@@ -177,7 +177,7 @@
           <button id="btn-toolbar-terminal" class="toolbar-btn" title="终端" data-i18n-title="terminal">
             <svg class="icon"><use href="#icon-terminal"></use></svg>
           </button>
-          <button id="btn-toolbar-diff" class="toolbar-btn" disabled title="Diff（即将推出）" data-i18n-title="diffComingSoon">
+          <button id="btn-toolbar-diff" class="toolbar-btn" title="Diff" data-i18n-title="diff">
             <svg class="icon"><use href="#icon-columns"></use></svg>
           </button>
           <button id="btn-toolbar-files" class="toolbar-btn" title="文件" data-i18n-title="files">
@@ -269,8 +269,8 @@
         <aside id="panel" class="hidden">
           <div id="panel-cards">
             <!--
-              Groups Files + File-preview into one unit so the Terminal view
-              (a sibling below, mutually exclusive with this one — see
+              Groups Files + File-preview into one unit so the Terminal/Diff
+              views (siblings below, mutually exclusive with this one — see
               setDockView in app.js) can hide both together with a single
               class toggle, without touching either card's own internal
               open/closed state (btn-preview-close etc. still work exactly
@@ -333,6 +333,24 @@
                 </div>
               </div>
               <div id="terminal-container"></div>
+            </section>
+
+            <!--
+              Workspace-wide read-only diff, independent of the file tree —
+              every git-changed file listed and expandable in place (see
+              #diff-list/renderDiffFile in app.js), not tied to whichever
+              single file Files/File-preview happens to have open.
+            -->
+            <section id="card-diff" class="dock-card hidden">
+              <div class="dock-card-header">
+                <span class="dock-card-title" data-i18n="diff">Diff</span>
+                <div class="dock-card-actions">
+                  <button id="btn-diff-refresh" title="刷新 Diff" data-i18n-title="refreshDiffTitle">
+                    <svg class="icon"><use href="#icon-refresh"></use></svg>
+                  </button>
+                </div>
+              </div>
+              <div id="diff-list"></div>
             </section>
 
           </div>

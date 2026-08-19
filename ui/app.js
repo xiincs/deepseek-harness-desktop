@@ -36,12 +36,16 @@ const els = {
   resizePanelCards: document.getElementById("resize-panel-cards"),
   btnToolbarFiles: document.getElementById("btn-toolbar-files"),
   btnToolbarTerminal: document.getElementById("btn-toolbar-terminal"),
+  btnToolbarDiff: document.getElementById("btn-toolbar-diff"),
   btnToolbarPlugins: document.getElementById("btn-toolbar-plugins"),
   dockViewFiles: document.getElementById("dock-view-files"),
   cardTerminal: document.getElementById("card-terminal"),
   terminalContainer: document.getElementById("terminal-container"),
   btnTerminalRestart: document.getElementById("btn-terminal-restart"),
   btnTerminalClose: document.getElementById("btn-terminal-close"),
+  cardDiff: document.getElementById("card-diff"),
+  diffList: document.getElementById("diff-list"),
+  btnDiffRefresh: document.getElementById("btn-diff-refresh"),
   pluginMarketOverlay: document.getElementById("plugin-market-overlay"),
   btnPluginMarketClose: document.getElementById("btn-plugin-market-close"),
   pluginMarketBrowse: document.getElementById("plugin-market-browse"),
@@ -118,7 +122,10 @@ const STRINGS = {
     pluginMarket: "插件市场",
     tagline: "探索未至之境",
     terminal: "终端",
-    diffComingSoon: "Diff（即将推出）",
+    diff: "Diff",
+    refreshDiffTitle: "刷新 Diff",
+    noChanges: "没有改动",
+    diffLoadFailed: (err) => `无法加载 Diff: ${err}`,
     files: "文件",
     minimize: "最小化",
     maximize: "最大化",
@@ -218,7 +225,10 @@ const STRINGS = {
     pluginMarket: "Plugin Market",
     tagline: "Explore the uncharted.",
     terminal: "Terminal",
-    diffComingSoon: "Diff (Coming Soon)",
+    diff: "Diff",
+    refreshDiffTitle: "Refresh Diff",
+    noChanges: "No changes",
+    diffLoadFailed: (err) => `Failed to load diff: ${err}`,
     files: "Files",
     minimize: "Minimize",
     maximize: "Maximize",
@@ -682,13 +692,13 @@ function initCardsResizeHandle() {
 
 // ── dock view switching ─────────────────────────────────────────────────
 //
-// One dock (#panel), two mutually exclusive views — Files and Terminal
-// share the same toolbar button group for a reason: opening one is meant
-// to replace the other, not stack beside it (unlike Files vs. its own
-// File-preview card, which *are* meant to sit together — see
-// #dock-view-files). Neither is persisted across launches; each toolbar
-// button is a deliberate opt-in per session. Only the dock's width (once
-// opened) is remembered, via panelWidth/PANEL_WIDTH_KEY above.
+// One dock (#panel), three mutually exclusive views — Files, Terminal and
+// Diff share the same toolbar button group for a reason: opening one is
+// meant to replace whichever of the others was open, not stack beside it
+// (unlike Files vs. its own File-preview card, which *are* meant to sit
+// together — see #dock-view-files). None is persisted across launches; each
+// toolbar button is a deliberate opt-in per session. Only the dock's width
+// (once opened) is remembered, via panelWidth/PANEL_WIDTH_KEY above.
 
 // `refresh: false` lets a caller that's about to drive its own, carefully
 // ordered refresh (see handleFileMention) switch to the Files view without
@@ -697,14 +707,16 @@ function initCardsResizeHandle() {
 // which could win before the caller's own state (e.g. currentPreviewPath)
 // is actually set, would put the exact same stale-selection race right back
 // after fixing it in the caller. Only meaningful for view: "files" —
-// opening the terminal view already has its own, independent readiness
-// gate (ensureTerminal()) that this option doesn't touch either way.
+// opening the terminal/diff views already have their own, independent
+// readiness gates (ensureTerminal()/refreshDiffView()) that this option
+// doesn't touch either way.
 function setDockView(view, { refresh = true } = {}) {
-  // view: "files" | "terminal" | null (closed) — the plugin market lives
-  // outside this dock entirely now (see #plugin-market-overlay in
+  // view: "files" | "terminal" | "diff" | null (closed) — the plugin market
+  // lives outside this dock entirely now (see #plugin-market-overlay in
   // index.html and togglePluginMarket below), so it's not a case here.
   const filesOpen = view === "files";
   const terminalOpen = view === "terminal";
+  const diffOpen = view === "diff";
 
   els.btnToolbarFiles.classList.toggle("active", filesOpen);
   els.dockViewFiles.classList.toggle("hidden", !filesOpen);
@@ -712,12 +724,24 @@ function setDockView(view, { refresh = true } = {}) {
   els.btnToolbarTerminal.classList.toggle("active", terminalOpen);
   els.cardTerminal.classList.toggle("hidden", !terminalOpen);
 
+  els.btnToolbarDiff.classList.toggle("active", diffOpen);
+  els.cardDiff.classList.toggle("hidden", !diffOpen);
+
   els.panel.classList.toggle("hidden", view === null);
   els.resizePanelContent.classList.toggle("hidden", view === null);
 
   if (filesOpen && refresh) refreshPanel();
   if (terminalOpen) {
     ensureTerminal().then(() => requestAnimationFrame(fitTerminal));
+  }
+  // Rebuilt fresh on every open rather than kept mounted across a close —
+  // see the "diff preview" section's own comment for why (no background
+  // poll to keep a hidden copy current, and a stack of CodeMirror instances
+  // isn't worth holding onto while the view isn't even visible).
+  if (diffOpen) {
+    refreshDiffView();
+  } else {
+    teardownDiffView();
   }
 }
 
@@ -799,6 +823,201 @@ async function ensureTerminal() {
 
 function toggleTerminal() {
   setDockView(els.btnToolbarTerminal.classList.contains("active") ? null : "terminal");
+}
+
+// ── diff preview ─────────────────────────────────────────────────────────
+//
+// The workspace-wide counterpart to the Files card's single-file preview:
+// every changed file (the same get_git_status data the tree already polls)
+// stacked as its own collapsible row, each lazily mounting a read-only
+// CodeMirror unifiedMergeView on first expand — same diffing engine and
+// visual language mountEditor() already uses for the editable single-file
+// preview, not a second hand-rolled diff renderer (panel.rs's
+// editable_preview doc comment already explains why this project moved off
+// computing/rendering diffs on the Rust side once before). mountEditor()
+// itself stays shaped for its own singleton editable pane (dirty tracking,
+// save keymap, one shared els.panelPreviewBody) — mountDiffContent() below
+// is a parallel function rather than a shared one, since nothing here is
+// ever editable and there can be many mounted at once.
+//
+// No background poll while this view is open (unlike
+// refreshTreeAndGitStatus's PANEL_POLL_MS cadence): rebuilding the whole
+// list out from under a user mid-way through reading a diff would blow away
+// their expanded rows and remount every open CodeMirror instance. Refreshes
+// only on open (setDockView) and via btn-diff-refresh, both explicit user
+// actions — and every refresh tears down and rebuilds from scratch (see
+// teardownDiffView), so there's no incremental-update path to keep in sync.
+
+let diffEditorViews = [];
+// Paths the user expanded, same idea as expandedDirs for the tree — lets a
+// manual refresh restore what was open instead of collapsing everything.
+// Not workspace-scoped/cleared on switch like expandedDirs is: worst case a
+// coincidentally same-relative-path file in a different workspace
+// auto-expands once, which is harmless (unlike the tree, this view always
+// does a full teardown-and-rebuild anyway, never an in-place incremental
+// update a stale entry could actually corrupt).
+const expandedDiffFiles = new Set();
+// Bumped by every teardown — refreshDiffView compares against this after
+// its own await to tell whether it's still the most recent refresh, same
+// staleness-check shape showPreview uses against currentPreviewPath. Lives
+// here (not just inside refreshDiffView) because a teardown can also arrive
+// from setDockView closing the view entirely while a refresh is mid-flight,
+// and that in-flight refresh must lose too, not just a second refresh call.
+let diffRefreshToken = 0;
+
+function teardownDiffView() {
+  diffRefreshToken++;
+  for (const view of diffEditorViews) view.destroy();
+  diffEditorViews = [];
+}
+
+// `preview` is the same Rust EditablePreview shape mountEditor() consumes:
+// { current: FileContent | null, original: FileContent | null }.
+function mountDiffContent(container, path, preview) {
+  const CM = window.CM;
+  const lang = languageExtensionForPath(path);
+  const extensions = [CM.basicSetup, ...buildCodeMirrorBaseExtensions(), CM.EditorState.readOnly.of(true)];
+  if (lang) extensions.push(lang);
+
+  if (preview.current === null) {
+    // Deleted: nothing on disk left to show, just HEAD's last content.
+    const originalText = contentTextOrNull(preview.original);
+    if (originalText === null) {
+      container.textContent = t("cannotReadHistoricalContent");
+      return;
+    }
+    diffEditorViews.push(new CM.EditorView({ doc: normalizeLineEndings(originalText), extensions, parent: container }));
+    return;
+  }
+
+  const current = preview.current;
+  if (current.kind === "binary") {
+    container.textContent = t("binaryFileNoPreview");
+    return;
+  }
+  if (current.kind === "tooLarge") {
+    container.textContent = t("fileTooLarge", (current.bytes / 1024 / 1024).toFixed(1));
+    return;
+  }
+  if (current.kind === "error") {
+    container.textContent = current.message;
+    return;
+  }
+
+  // Untracked files have no HEAD version to diff against — same as
+  // mountEditor(), that just renders as plain content with no merge
+  // decorations rather than a synthetic "all lines added" diff.
+  const originalText = contentTextOrNull(preview.original);
+  if (originalText !== null) extensions.push(CM.unifiedMergeView({ original: normalizeLineEndings(originalText), mergeControls: false }));
+  diffEditorViews.push(new CM.EditorView({ doc: normalizeLineEndings(current.content), extensions, parent: container }));
+}
+
+// One row per changed file, reusing the tree's own row/badge classes
+// (tree-row/tree-file/tree-caret/git-badge/GIT_STATUS_CLASS) rather than a
+// second parallel set of look-alike styles — visually it *is* the same kind
+// of row (icon, path, status badge, disclosure caret), just inside
+// #diff-list instead of #panel-tree.
+function renderDiffFile(entry) {
+  const wrap = document.createElement("div");
+
+  const header = document.createElement("div");
+  header.className = "tree-row tree-file";
+  if (GIT_STATUS_CLASS[entry.status]) header.classList.add(GIT_STATUS_CLASS[entry.status]);
+  header.appendChild(iconEl("chevron-right", "tree-caret"));
+  header.appendChild(iconEl("file", "tree-icon"));
+  const label = document.createElement("span");
+  label.className = "tree-label";
+  label.textContent = entry.path;
+  header.appendChild(label);
+  if (GIT_STATUS_LETTER[entry.status]) {
+    const badge = document.createElement("span");
+    badge.className = "git-badge";
+    badge.textContent = GIT_STATUS_LETTER[entry.status];
+    header.appendChild(badge);
+  }
+  wrap.appendChild(header);
+
+  const body = document.createElement("div");
+  body.className = "diff-file-body hidden";
+  wrap.appendChild(body);
+
+  // Fetches and mounts at most once per row instance — re-collapsing and
+  // re-expanding the same row within one refresh just toggles visibility,
+  // it doesn't refetch or remount.
+  let loaded = false;
+  async function loadDiffBody() {
+    if (loaded) return;
+    loaded = true;
+    const loading = document.createElement("p");
+    loading.className = "muted panel-empty";
+    loading.textContent = t("loading");
+    body.appendChild(loading);
+    try {
+      const preview = await invoke("get_editable_preview", { path: entry.path, overridePath: lockedWorkspace });
+      // A refresh (manual, or the view closing) may have already rebuilt
+      // #diff-list from scratch while this fetch was in flight, detaching
+      // this exact row from the document — mounting into it at that point
+      // would create a CodeMirror instance nothing will ever show or clean
+      // up until the next teardown happens to sweep the shared
+      // diffEditorViews array. Cheap to just not bother.
+      if (!body.isConnected) return;
+      body.replaceChildren();
+      mountDiffContent(body, entry.path, preview);
+    } catch (err) {
+      if (!body.isConnected) return;
+      body.replaceChildren();
+      body.textContent = t("previewLoadFailed", err);
+    }
+  }
+
+  header.addEventListener("click", () => {
+    const expanded = !body.classList.toggle("hidden");
+    header.classList.toggle("tree-expanded", expanded);
+    if (expanded) {
+      expandedDiffFiles.add(entry.path);
+      loadDiffBody();
+    } else {
+      expandedDiffFiles.delete(entry.path);
+    }
+  });
+
+  if (expandedDiffFiles.has(entry.path)) {
+    body.classList.remove("hidden");
+    header.classList.add("tree-expanded");
+    loadDiffBody();
+  }
+
+  return wrap;
+}
+
+async function refreshDiffView() {
+  teardownDiffView();
+  const token = diffRefreshToken;
+  try {
+    const gitEntries = await invoke("get_git_status", { overridePath: lockedWorkspace });
+    // A newer refresh (or the view closing, which also bumps this via
+    // teardownDiffView) already superseded this call — don't clobber
+    // whatever it already rendered with this older response.
+    if (token !== diffRefreshToken) return;
+    els.diffList.replaceChildren();
+    if (gitEntries.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "muted panel-empty";
+      empty.textContent = t("noChanges");
+      els.diffList.appendChild(empty);
+      return;
+    }
+    for (const entry of gitEntries) {
+      els.diffList.appendChild(renderDiffFile(entry));
+    }
+  } catch (err) {
+    if (token !== diffRefreshToken) return;
+    els.diffList.textContent = t("diffLoadFailed", err);
+  }
+}
+
+function toggleDiff() {
+  setDockView(els.btnToolbarDiff.classList.contains("active") ? null : "diff");
 }
 
 // ── plugin market ────────────────────────────────────────────────────────
@@ -2079,6 +2298,7 @@ async function init() {
   els.btnOpenBrowser.addEventListener("click", () => invoke("open_in_browser"));
   els.btnToolbarFiles.addEventListener("click", toggleDock);
   els.btnToolbarTerminal.addEventListener("click", toggleTerminal);
+  els.btnToolbarDiff.addEventListener("click", toggleDiff);
   els.btnToolbarPlugins.addEventListener("click", togglePluginMarket);
   els.btnPluginMarketClose.addEventListener("click", closePluginMarket);
   els.pluginMarketOverlay.addEventListener("click", (e) => {
@@ -2123,6 +2343,7 @@ async function init() {
     syncCardResizeHandleVisibility();
   });
   els.btnPanelRefresh.addEventListener("click", refreshPanel);
+  els.btnDiffRefresh.addEventListener("click", refreshDiffView);
   els.panelWorkspaceSelect.addEventListener("change", async () => {
     const value = els.panelWorkspaceSelect.value;
     if (!(await confirmDiscardIfNeeded())) {

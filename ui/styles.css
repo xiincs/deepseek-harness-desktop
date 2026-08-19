@@ -434,10 +434,10 @@ body.platform-decorated #toolbar-actions {
   display: none;
 }
 
-/* Mutually exclusive with #dock-view-files (see setDockView in app.js) — a
-   terminal reads as its own full pane whenever it's open, unlike Files/File
-   which are deliberately small, list/diff-sized panes meant to sit side by
-   side with each other. */
+/* Mutually exclusive with #dock-view-files and #card-diff (see setDockView
+   in app.js) — a terminal reads as its own full pane whenever it's open,
+   unlike Files/File which are deliberately small, list/diff-sized panes
+   meant to sit side by side with each other. */
 #card-terminal {
   flex: 1;
   min-height: 240px;
@@ -449,6 +449,39 @@ body.platform-decorated #toolbar-actions {
   overflow: hidden;
   padding: 6px 8px;
   background: var(--terminal-bg);
+}
+
+/* Mutually exclusive with #dock-view-files and #card-terminal, same as
+   #card-terminal above — full pane whenever open. */
+#card-diff {
+  flex: 1;
+  min-height: 240px;
+}
+
+#diff-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  padding: 4px 8px 10px;
+  min-height: 0;
+}
+
+/* Indented under its own row like .tree-children, capped and internally
+   scrollable rather than left to grow to full content height — several
+   expanded files stacked at unbounded height would turn "skim a few diffs"
+   into "scroll past a 2000-line file to reach the next one". CodeMirror's
+   own theme sets .cm-editor to height:100% (see buildCodeMirrorBaseExtensions
+   in app.js), which against this max-height-but-no-height box resolves to
+   auto per the CSS spec — so short diffs stay their natural size and only
+   long ones actually hit the cap and scroll internally. */
+.diff-file-body {
+  max-height: 340px;
+  overflow-y: auto;
+  margin: 2px 0 6px 20px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
 }
 
 /* ── plugin market: full-window dialog ──────────────────────────────────
