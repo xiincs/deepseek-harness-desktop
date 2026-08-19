@@ -720,13 +720,23 @@ fn install_external_link_handlers(app: &AppHandle, win: &tauri::WebviewWindow) {
                     let uri = take_pwstr(uri_ptr);
                     if is_external_http(&uri) {
                         let _ = app_new_window.opener().open_url(uri, None::<&str>);
+                        // Only mark handled for the request this actually
+                        // acted on. Per WebView2's own NewWindowRequested
+                        // docs, `Handled=true` with no `NewWindow` set isn't
+                        // "block this popup the same as leaving it alone" —
+                        // it hands the opener script a dummy window that
+                        // never loads and is immediately closed, whereas
+                        // `Handled=false` (the default) lets WebView2 open
+                        // an ordinary popup that actually navigates. A
+                        // same-origin (127.0.0.1) `window.open()` — e.g. the
+                        // harness triggering a file download without
+                        // navigating its own top-level page away — falls
+                        // through this `if` untouched, and unconditionally
+                        // calling SetHandled(true) below used to kill that
+                        // navigation outright before it ever loaded, which
+                        // silently ate the download.
+                        args.SetHandled(true)?;
                     }
-                    // Handled either way: a bare `SetHandled(false)` still
-                    // leaves the popup blocked (WebView2's default), it just
-                    // stops this handler from being the reason — so the net
-                    // effect without this line is identical to today's
-                    // "point-blank clicks do nothing" bug this exists to fix.
-                    args.SetHandled(true)?;
                     Ok(())
                 })),
                 &mut token_new_window,
