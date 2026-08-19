@@ -317,6 +317,8 @@
                     <span id="panel-preview-dirty-dot" class="hidden" title="有未保存的改动" data-i18n-title="unsavedChangesTitle">●</span>
                   </div>
                   <div class="dock-card-actions">
+                    <!-- Only unhidden for .md files — see isMarkdownPath/mountEditor in app.js. -->
+                    <button id="btn-preview-markdown-toggle" class="hidden" data-i18n="previewMarkdown">预览</button>
                     <button id="btn-preview-revert" class="hidden" title="放弃改动，还原为已保存内容" data-i18n-title="revertTitle" data-i18n="revert">还原</button>
                     <button id="btn-preview-save" class="hidden" title="保存改动 (Ctrl+S)" data-i18n-title="saveTitle" data-i18n="save">保存</button>
                     <button id="btn-preview-close" title="关闭预览" data-i18n-title="closePreviewTitle">✕</button>
@@ -541,6 +543,17 @@
     -->
     <script src="vendor/codemirror/codemirror-bundle.min.js"></script>
     <script src="vendor/xterm/xterm-bundle.min.js"></script>
+    <!--
+      Renders the "预览" view for .md files (see toggleMarkdownPreview in
+      app.js) — CodeMirror's own markdown language mode (above) only
+      highlights source syntax, it doesn't produce HTML. Vendored locally,
+      same offline-first reasoning as the two bundles above: window.marked
+      is the unmodified lib/marked.umd.js published in the marked npm
+      package (see vendor/marked/LICENSE for the exact version) — no esbuild
+      step needed for this one, marked already ships this as a ready-to-use
+      browser UMD build, just not pre-minified upstream.
+    -->
+    <script src="vendor/marked/marked.umd.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

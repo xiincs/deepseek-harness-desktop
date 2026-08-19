@@ -90,6 +90,7 @@ const els = {
   btnPreviewClose: document.getElementById("btn-preview-close"),
   btnPreviewSave: document.getElementById("btn-preview-save"),
   btnPreviewRevert: document.getElementById("btn-preview-revert"),
+  btnMarkdownToggle: document.getElementById("btn-preview-markdown-toggle"),
   confirmDialogOverlay: document.getElementById("confirm-dialog-overlay"),
   confirmDialogMessage: document.getElementById("confirm-dialog-message"),
   btnConfirmDialogCancel: document.getElementById("btn-confirm-dialog-cancel"),
@@ -149,6 +150,8 @@ const STRINGS = {
     collapse: "收起",
     chooseWorkspaceTitle: "选择要在文件树中查看的工作区",
     unsavedChangesTitle: "有未保存的改动",
+    previewMarkdown: "预览",
+    editMarkdown: "编辑",
     revert: "还原",
     revertTitle: "放弃改动，还原为已保存内容",
     save: "保存",
@@ -254,6 +257,8 @@ const STRINGS = {
     collapse: "Collapse",
     chooseWorkspaceTitle: "Choose which workspace to show in the file tree",
     unsavedChangesTitle: "Unsaved changes",
+    previewMarkdown: "Preview",
+    editMarkdown: "Edit",
     revert: "Revert",
     revertTitle: "Discard changes and revert to the last saved version",
     save: "Save",
@@ -1785,6 +1790,14 @@ let currentSavedContent = null;
 // normalizeLineEndings and saveCurrentEdit). Independent of currentSavedContent
 // staying \n-only: this is the one place that original separator survives.
 let currentLineEnding = null;
+// Whether the currently-open markdown file is showing its rendered preview
+// instead of the CodeMirror editor pane — see toggleMarkdownPreview. Reset
+// to false in showPreview (a newly-opened file always starts in edit mode)
+// but deliberately *not* touched by mountEditor itself, since that also
+// runs from refreshCurrentPreview's background poll and a poll-driven
+// remount while the user happens to be looking at the rendered preview
+// shouldn't silently kick them back to the editor.
+let markdownPreviewMode = false;
 // Built once, lazily, and reused by every editor instance — colors are
 // resolved via var(...) at paint time, so they already stay correct across
 // a live prefers-color-scheme change without rebuilding this.
@@ -1983,6 +1996,12 @@ function mountEditor(path, preview) {
   const CM = window.CM;
   destroyEditor();
   els.panelPreviewBody.replaceChildren();
+  // Hidden by default, every path through this function — only the plain
+  // editable-text branch at the bottom re-shows it, and only for a .md
+  // path. Without this, opening a deleted/binary/tooLarge/error file right
+  // after a markdown one would leave the button visibly showing from that
+  // previous mount instead of reflecting what's actually on screen now.
+  els.btnMarkdownToggle.classList.add("hidden");
 
   if (preview.current === null) {
     const originalText = contentTextOrNull(preview.original);
@@ -2056,14 +2075,115 @@ function mountEditor(path, preview) {
   // changed instead of just the lines that actually differ.
   if (originalText !== null) extensions.push(CM.unifiedMergeView({ original: normalizeLineEndings(originalText), mergeControls: false }));
 
-  currentEditorView = new CM.EditorView({ doc: normalizedCurrent, extensions, parent: els.panelPreviewBody });
+  // Markdown files get a second, initially-hidden sibling pane for the
+  // rendered preview (see applyMarkdownPreviewMode) — every other file type
+  // keeps mounting CodeMirror straight into panelPreviewBody exactly as
+  // before, no wrapper, no unused pane sitting around for something that'll
+  // never toggle.
+  const isMarkdown = isMarkdownPath(path);
+  els.btnMarkdownToggle.classList.toggle("hidden", !isMarkdown);
+  let editorParent = els.panelPreviewBody;
+  if (isMarkdown) {
+    const editorPane = document.createElement("div");
+    editorPane.className = "editor-pane";
+    els.panelPreviewBody.appendChild(editorPane);
+    const previewPane = document.createElement("div");
+    previewPane.className = "markdown-preview-pane hidden";
+    els.panelPreviewBody.appendChild(previewPane);
+    editorParent = editorPane;
+  }
+
+  currentEditorView = new CM.EditorView({ doc: normalizedCurrent, extensions, parent: editorParent });
   currentSavedContent = normalizedCurrent;
   setDirty(false);
+  if (isMarkdown) applyMarkdownPreviewMode();
+}
+
+// .md only — the same single extension languageExtensionForPath already
+// recognizes for edit-mode syntax highlighting. Keeping preview support
+// scoped to exactly that set avoids a mismatch where a file gets a preview
+// toggle but plain, unhighlighted text in edit mode (or vice versa).
+function isMarkdownPath(path) {
+  return path.toLowerCase().endsWith(".md");
+}
+
+// Renders window.marked's output inside a maximally-sandboxed iframe rather
+// than setting innerHTML directly on this (privileged, real Tauri IPC
+// access) document. marked doesn't sanitize its output — raw HTML embedded
+// in the source markdown passes straight through — and this preview can be
+// pointed at *any* .md file in the opened workspace, not just ones the user
+// wrote themselves (a cloned repo's README, a node_modules package's docs,
+// …). An empty sandbox="" blocks script execution structurally (no
+// allow-scripts, no allow-same-origin) rather than relying on correctly
+// stripping every dangerous tag/attribute ourselves.
+function renderMarkdownPreview(container, text) {
+  container.replaceChildren();
+  const frame = document.createElement("iframe");
+  frame.className = "markdown-preview-frame";
+  frame.setAttribute("sandbox", "");
+  container.appendChild(frame);
+  const html = window.marked.parse(text);
+  frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><style>${markdownPreviewStyle()}</style></head><body>${html}</body></html>`;
+}
+
+// Mirrors this project's own CSS tokens into the sandboxed iframe (which,
+// lacking allow-same-origin, can't see the parent document's stylesheet or
+// var(...) values at all) — same "resolve at render time via
+// getComputedStyle" approach mountXtermForTab already uses for xterm's
+// theme, just with more properties since this is prose, not a terminal grid.
+function markdownPreviewStyle() {
+  const style = getComputedStyle(document.documentElement);
+  const v = (name) => style.getPropertyValue(name).trim();
+  return `
+    body { margin: 0; padding: 14px 16px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; line-height: 1.6; color: ${v("--text")}; background: ${v("--card")}; }
+    h1, h2, h3, h4, h5, h6 { font-weight: 600; margin: 1.2em 0 0.5em; }
+    h1, h2 { border-bottom: 1px solid ${v("--card-border")}; padding-bottom: 0.3em; }
+    h1 { font-size: 1.6em; }
+    h2 { font-size: 1.35em; }
+    p, ul, ol, blockquote, table, pre { margin: 0.6em 0; }
+    a { color: ${v("--accent")}; }
+    code { font-family: "SF Mono","JetBrains Mono","Fira Code",Consolas,Menlo,monospace; font-size: 0.9em; background: ${v("--btn-hover-bg")}; padding: 0.15em 0.4em; border-radius: 4px; }
+    pre { background: ${v("--sidebar-bg")}; padding: 10px 12px; border-radius: 8px; overflow: auto; }
+    pre code { background: none; padding: 0; }
+    blockquote { border-left: 3px solid ${v("--card-border")}; margin-left: 0; padding: 0.2em 1em; color: ${v("--muted")}; }
+    table { border-collapse: collapse; }
+    th, td { border: 1px solid ${v("--card-border")}; padding: 5px 10px; }
+    img { max-width: 100%; }
+    hr { border: none; border-top: 1px solid ${v("--card-border")}; }
+  `;
+}
+
+// Applies the current markdownPreviewMode to whichever editor/preview pane
+// pair mountEditor most recently built — called both right after that
+// build (so a poll-driven remount that happens to land while the user is
+// looking at the preview stays on the preview, re-rendered from the fresh
+// content) and from the toggle button's own click handler.
+function applyMarkdownPreviewMode() {
+  const editorPane = els.panelPreviewBody.querySelector(".editor-pane");
+  const previewPane = els.panelPreviewBody.querySelector(".markdown-preview-pane");
+  if (!editorPane || !previewPane || !currentEditorView) return;
+  els.btnMarkdownToggle.textContent = markdownPreviewMode ? t("editMarkdown") : t("previewMarkdown");
+  if (markdownPreviewMode) {
+    renderMarkdownPreview(previewPane, currentEditorView.state.doc.toString());
+    editorPane.classList.add("hidden");
+    previewPane.classList.remove("hidden");
+  } else {
+    previewPane.classList.add("hidden");
+    editorPane.classList.remove("hidden");
+    currentEditorView.focus();
+  }
+}
+
+function toggleMarkdownPreview() {
+  if (!currentEditorView) return;
+  markdownPreviewMode = !markdownPreviewMode;
+  applyMarkdownPreviewMode();
 }
 
 async function showPreview(path) {
   if (!(await confirmDiscardIfNeeded())) return;
   currentPreviewPath = path;
+  markdownPreviewMode = false;
   els.cardFile.classList.remove("hidden");
   syncCardResizeHandleVisibility();
   els.panelPreviewTitle.textContent = path;
@@ -2568,6 +2688,7 @@ async function init() {
   els.btnPreviewClose.addEventListener("click", closePreview);
   els.btnPreviewSave.addEventListener("click", saveCurrentEdit);
   els.btnPreviewRevert.addEventListener("click", revertCurrentEdit);
+  els.btnMarkdownToggle.addEventListener("click", toggleMarkdownPreview);
   els.btnConfirmDialogOk.addEventListener("click", () => closeDialog(true));
   els.btnConfirmDialogCancel.addEventListener("click", () => closeDialog(false));
   els.confirmDialogOverlay.addEventListener("click", (e) => {

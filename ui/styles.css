@@ -1355,6 +1355,23 @@ body.resizing-rows #panel-preview-body {
   object-fit: contain;
 }
 
+/* Sibling panes for a markdown file's editor/rendered-preview toggle (see
+   applyMarkdownPreviewMode in app.js) — only one is ever un-hidden at a
+   time, both sized to fill #panel-preview-body the same way the plain
+   CodeMirror-direct-in-panelPreviewBody case (no .editor-pane wrapper)
+   already does for every non-markdown file. */
+.editor-pane,
+.markdown-preview-pane {
+  height: 100%;
+}
+
+.markdown-preview-frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+}
+
 .tree-row {
   display: flex;
   align-items: center;
