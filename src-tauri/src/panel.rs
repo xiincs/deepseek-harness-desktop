@@ -757,6 +757,14 @@ pub fn reveal_in_file_manager(app: &tauri::AppHandle, root: &Path, rel_path: &st
     app.opener().reveal_item_in_dir(&target).map_err(|e| e.to_string())
 }
 
+/// Opens `rel_path` with the OS's default application for its file type —
+/// same plugin/pattern as `reveal_in_file_manager` above, `open_path`
+/// instead of `reveal_item_in_dir`.
+pub fn open_with_default_app(app: &tauri::AppHandle, root: &Path, rel_path: &str) -> Result<(), String> {
+    let target = resolve_within_root(root, rel_path)?;
+    app.opener().open_path(target.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
+}
+
 /// The tree's "Copy Path" context menu item: `rel_path` resolved to a real,
 /// OS-native absolute path string (backslash-separated on Windows) — the
 /// client only ever has the `/`-separated workspace-relative form

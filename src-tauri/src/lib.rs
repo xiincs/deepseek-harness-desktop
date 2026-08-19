@@ -224,6 +224,14 @@ fn reveal_in_file_manager(app: AppHandle, state: State<'_, AppState>, path: Stri
 }
 
 #[tauri::command]
+fn open_with_default_app(app: AppHandle, state: State<'_, AppState>, path: String, override_path: Option<String>) -> Result<(), String> {
+    let root = override_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| panel::effective_workspace_dir(&app, &state.server));
+    panel::open_with_default_app(&app, &root, &path)
+}
+
+#[tauri::command]
 fn get_absolute_path(app: AppHandle, state: State<'_, AppState>, path: String, override_path: Option<String>) -> Result<String, String> {
     let root = override_path
         .map(PathBuf::from)
@@ -891,6 +899,7 @@ pub fn run() {
             move_entry,
             delete_entry,
             reveal_in_file_manager,
+            open_with_default_app,
             get_absolute_path,
             terminal::terminal_spawn,
             terminal::terminal_write,

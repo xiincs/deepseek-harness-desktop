@@ -161,6 +161,7 @@ const STRINGS = {
     copyPath: "复制路径",
     copyRelativePath: "复制相对路径",
     revealInFileManager: "在文件资源管理器中显示",
+    openWithDefaultApp: "打开",
     newFileNamePrompt: "输入新文件名",
     newFolderNamePrompt: "输入新文件夹名",
     renamePrompt: "输入新名称",
@@ -171,6 +172,7 @@ const STRINGS = {
     moveEntryFailed: (err) => `移动失败: ${err}`,
     deleteEntryFailed: (err) => `删除失败: ${err}`,
     revealFailed: (err) => `无法打开文件资源管理器: ${err}`,
+    openWithDefaultAppFailed: (err) => `无法打开: ${err}`,
     copyPathFailed: (err) => `复制路径失败: ${err}`,
     revert: "还原",
     revertTitle: "放弃改动，还原为已保存内容",
@@ -286,6 +288,7 @@ const STRINGS = {
     copyPath: "Copy Path",
     copyRelativePath: "Copy Relative Path",
     revealInFileManager: "Reveal in File Manager",
+    openWithDefaultApp: "Open",
     newFileNamePrompt: "Enter a file name",
     newFolderNamePrompt: "Enter a folder name",
     renamePrompt: "Enter a new name",
@@ -296,6 +299,7 @@ const STRINGS = {
     moveEntryFailed: (err) => `Move failed: ${err}`,
     deleteEntryFailed: (err) => `Delete failed: ${err}`,
     revealFailed: (err) => `Failed to open file manager: ${err}`,
+    openWithDefaultAppFailed: (err) => `Failed to open: ${err}`,
     copyPathFailed: (err) => `Failed to copy path: ${err}`,
     revert: "Revert",
     revertTitle: "Discard changes and revert to the last saved version",
@@ -1995,8 +1999,20 @@ async function revealTreeEntry(target) {
   }
 }
 
+async function openTreeEntry(target) {
+  try {
+    await invoke("open_with_default_app", { path: target.path, overridePath: lockedWorkspace });
+  } catch (err) {
+    showAlertDialog(t("openWithDefaultAppFailed", err));
+  }
+}
+
 function openTreeContextMenu(x, y, target) {
   els.treeContextMenu.replaceChildren();
+  if (target !== null && !target.isDir) {
+    addContextMenuItem(t("openWithDefaultApp"), () => openTreeEntry(target));
+    addContextMenuSeparator();
+  }
   addContextMenuItem(t("newFile"), () => createTreeEntry(false, target));
   addContextMenuItem(t("newFolder"), () => createTreeEntry(true, target));
   if (target !== null) {
