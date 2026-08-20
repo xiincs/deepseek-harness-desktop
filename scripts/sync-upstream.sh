@@ -48,6 +48,25 @@ APP_NAME="$PRODUCT_NAME.app"
 IS_MACOS=0
 [ "$(uname)" = "Darwin" ] && IS_MACOS=1
 
+# 进程/端口检测辅助函数（ps/lsof 实现；不用 pgrep/pkill——实测部分环境
+# pgrep -f 匹配不可靠，进程明明在跑却匹配不到，会导致清理失败、端口冲突）。
+find_main_pids() { # 主进程 PID 列表
+  ps -axo pid=,args= | grep -F "/Applications/$APP_NAME/Contents/MacOS/$PRODUCT_NAME" | grep -v grep | awk '{print $1}'
+}
+find_runtime_pids() { # runtime web 服务（孤儿化后仍占端口）PID 列表
+  ps -axo pid=,args= | grep -F "/Applications/$APP_NAME/Contents/Resources/runtime" | grep -v grep | awk '{print $1}'
+}
+# 探测 dsh web 服务实际使用的端口（优先从运行中的 web 进程命令行取，取不到回退 3080）
+find_web_port() {
+  local port
+  port="$(ps -axo args= | grep -F "/Applications/$APP_NAME/Contents/Resources/runtime" | grep -v grep \
+    | sed -nE 's/.*--port[ =]([0-9]+).*/\1/p' | head -1)"
+  [ -n "$port" ] && echo "$port" || echo 3080
+}
+port_owner() { # 指定端口占用者 PID
+  lsof -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null
+}
+
 echo "==> 1/6 拉取上游最新提交"
 git fetch origin
 
@@ -126,12 +145,59 @@ if [ "$DO_INSTALL" -eq 1 ] && [ "$IS_MACOS" -eq 1 ]; then
     echo "中止：未找到有效的新构建产物 $BUNDLE ——旧安装保持不变。" >&2
     exit 1
   fi
-  echo "==> 6/6 退出运行中的实例并替换 /Applications"
+  echo "==> 6/6 彻底退出运行中的实例并替换 /Applications"
+  # 与 CLAUDE.md 里 Windows 侧 "taskkill /F /T" 同样的原则：必须连子进程一起清理。
+  # dsh-desktop 退出后，其 runtime/node web 服务子进程可能变孤儿继续占端口，
+  # 而应用又有"服务挂了自动重启"机制——只退主进程会让新旧实例抢端口、反复拉起。
   osascript -e "tell application \"$PRODUCT_NAME\" to quit" 2>/dev/null || true
   sleep 2
+  for pid in $(find_main_pids) $(find_runtime_pids); do
+    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+  done
+  sleep 2
+  WEB_PORT="$(find_web_port)"
+  if [ -n "$(port_owner "$WEB_PORT")" ]; then
+    echo "    端口 $WEB_PORT 仍被占用，强制清理残留进程..."
+    for pid in $(port_owner "$WEB_PORT"); do
+      [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+    done
+    sleep 2
+  fi
+  # 启动前确认：旧实例完全退出、端口释放（最多等 5 秒），否则中止——绝不对
+  # 运行中的实例做覆盖安装。
+  for i in 1 2 3 4 5; do
+    if [ -z "$(find_main_pids)" ] && [ -z "$(port_owner "$WEB_PORT")" ]; then
+      break
+    fi
+    sleep 1
+  done
+  if [ -n "$(find_main_pids)" ]; then
+    echo "中止：旧实例未能完全退出（请手动退出后重试），旧安装保持不变。" >&2
+    exit 1
+  fi
+  echo "    旧实例已完全退出，端口已释放"
   rm -rf "/Applications/$APP_NAME"
   cp -R "$BUNDLE" /Applications/
   open "/Applications/$APP_NAME"
+  # 启动后校验：新进程存在、Web 服务就绪（最多等 15 秒）
+  sleep 3
+  for i in 1 2 3 4 5 6; do
+    [ -n "$(port_owner "$WEB_PORT")" ] && break
+    sleep 2
+  done
+  NEW_PIDS="$(find_main_pids)"
+  if [ -z "$NEW_PIDS" ]; then
+    echo "    警告：未检测到新版进程，可能需要手动打开应用"
+  else
+    COUNT="$(echo "$NEW_PIDS" | wc -l | tr -d ' ')"
+    echo "    新版进程已运行 (PID: $(echo "$NEW_PIDS" | tr '\n' ' '))"
+    [ "$COUNT" -gt 1 ] && echo "    警告：检测到多个进程实例，若界面异常请重启应用"
+  fi
+  if [ -n "$(port_owner "$WEB_PORT")" ]; then
+    echo "    Web 界面服务已就绪 (端口 $WEB_PORT)"
+  else
+    echo "    警告：端口 $WEB_PORT 尚未就绪，请稍后刷新页面；若长时间无响应请重启应用"
+  fi
   echo "    完成：新版本已安装并启动"
 elif [ "$DO_INSTALL" -eq 1 ]; then
   echo "==> 6/6 当前平台不自动安装，请手动使用构建产物"
