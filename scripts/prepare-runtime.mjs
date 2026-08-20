@@ -39,7 +39,17 @@ if (sourceBin && existsSync(sourceBin)) {
   // the shell-escaping caveat that comes with `shell: true` doesn't apply.
   execFileSync(
     `npm install --prefix "${runtimeDir}" "@deepseek-ai/dsh@${version}" --omit=dev --no-audit --no-fund --no-progress --prefer-offline --fetch-retries=5 --fetch-retry-mintimeout=2000`,
-    { stdio: "inherit", shell: true },
+    {
+      stdio: "inherit",
+      shell: true,
+      // macos-latest CI runners are 7GB total; V8's auto-sized heap ceiling
+      // (~2GB there) is too tight to resolve this dependency tree with no
+      // lockfile to shortcut against, and reliably crashes with "JavaScript
+      // heap out of memory" instead of completing. 4096 leaves real headroom
+      // under the runner's actual ceiling — the commonly-suggested 8192
+      // would exceed this runner's total physical memory outright.
+      env: { ...process.env, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --max-old-space-size=4096`.trim() },
+    },
   );
 }
 
