@@ -30,7 +30,7 @@ so it is fast and offline after the first run.
 | `DSH_DESKTOP_NODE` | Absolute path to `node.exe` to use instead of the one on `PATH` |
 | `DSH_DESKTOP_DSH_BIN` | Absolute path to a `dsh` `lib/bin.js` (e.g. a local checkout) |
 | `DSH_DESKTOP_RUNTIME_DIR` | Where the managed `@deepseek-ai/dsh` runtime is installed (default: app cache dir); point it at an existing `node_modules` root to skip the first-run npm install |
-| `DSH_DESKTOP_DSH_VERSION` | npm version spec for the managed runtime (default `0.1.0-rc.7`) |
+| `DSH_DESKTOP_DSH_VERSION` | npm version spec for the managed runtime (default `0.1.0-rc.8`) |
 | `DSH_DESKTOP_PORT` | Default bind port override (default `3080`); handy for running several instances |
 | `DSH_DESKTOP_CWD` | Working directory for the `dsh` server process (default: user home) |
 | `DSH_HOME` | Passed through to the server; harness data root (default `~/.dsh`) |
