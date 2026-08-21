@@ -98,6 +98,12 @@ added feature so you can edit files without leaving the app, fully isolated from
 The app itself opens fine offline, but whether the DeepSeek Harness service inside it needs a
 network connection depends entirely on how you've configured your model provider.
 
+**Why doesn't the app track the newest pre-release version of dsh?**
+On purpose: this app only follows upstream once a version is marked as the official default, not
+just because a newer pre-release version number shows up. Some pre-releases get promoted a few
+days later; others get quietly superseded by an even newer one and never promoted at all —
+tracking them early would mean passing that uncertainty on to you.
+
 **Want to contribute or build it yourself?**
 Welcome — see the [development guide](docs/DEVELOPMENT.en.md).
 

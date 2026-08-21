@@ -115,4 +115,22 @@ installed once via `npm install` on first use ([server.rs](../src-tauri/src/serv
 `dsh` has to clear `DSH_DESKTOP_RUNTIME_DIR` (or set `DSH_DESKTOP_DSH_VERSION` to a newer spec)
 and let it reinstall. This is a known, narrow gap — not worth a bespoke updater for a path that's
 mainly used in development.
+
+### Why the pinned version can lag behind the newest RC on npm
+
+`check:dsh-version` compares against npm's **`latest` dist-tag**, not "the newest published
+version string" — upstream publishes new RCs to `next` first (or under no tag at all), watches
+them for a while before deciding whether to point `latest` at them, and sometimes abandons one
+partway through, superseded by a newer version while `latest` never moves. This happened for
+real: `0.1.0-rc.8` sat on `next` for two days without ever being promoted to `latest`, then got
+bumped off `next` entirely by `0.1.1-rc.1` — `latest` stayed on `0.1.0-rc.7` the whole time (see
+[3a55628](../commit/3a55628) for the details). Chasing "newest published version" instead of the
+`latest` tag would have pinned this app to a release upstream itself never endorsed and, in
+hindsight, effectively skipped.
+
+So `DSH_VERSION_DEFAULT` only gets bumped when the `latest` tag actually moves — a new version
+showing up on `next`, no matter how many days it sits there looking stable, isn't the signal to
+act on. `check:dsh-version` gates on exactly that (`dist-tags`, not `versions.at(-1)`). To try an
+unpromoted version yourself, override it with `DSH_DESKTOP_DSH_VERSION` (see "Environment
+overrides" above) rather than changing the hardcoded default.
 </content>

@@ -108,4 +108,18 @@ build` 自身的 `beforeBuildCommand` 保证每次打包前都会用 `DSH_VERSIO
 的用户如果想用更新的 `dsh`，得自己清空 `DSH_DESKTOP_RUNTIME_DIR`（或者把 `DSH_DESKTOP_DSH_VERSION`
 设成更新的版本号）让它重装。这是一个已知但影响面很窄的缺口——这条路径主要在开发时用得到，不值得为它
 单独搭一套更新机制。
+
+### 为什么锁定的版本可能落后于 npm 上"最新发布"的 RC
+
+`check:dsh-version` 比对的是 npm 的 **`latest` dist-tag**，不是"最新发布的版本号"——上游会先把新
+RC 发到 `next`（或者不挂任何 tag），观察一段时间再决定要不要把 `latest` 指过去，也可能中途放弃，
+被更新的版本直接顶替、`latest` 全程不动。真实发生过一次：`0.1.0-rc.8` 发布后在 `next` 上挂了两天，
+从未被提升为 `latest`，随后又被 `0.1.1-rc.1` 顶替掉了 `next` 的位置，`latest` 全程停在
+`0.1.0-rc.7`（细节见 [3a55628](../commit/3a55628)）。如果当初追的是"最新发布版本号"而不是
+`latest` 标签，这个仓库会一路追着一个上游自己都没有背书、事后看等于被跳过的版本。
+
+所以 `DSH_VERSION_DEFAULT` 只在 `latest` 标签真正移动时才跟进——`next` 上出现新版本，哪怕挂了
+好几天看起来很稳定，都不是该跟进的信号。`check:dsh-version` 脚本就是照这个信号做门控的（查
+`dist-tags`，不是 `versions.at(-1)`）。想手动尝鲜一个还没转正的版本，用
+`DSH_DESKTOP_DSH_VERSION` 覆盖（见上面"环境变量覆盖项"），不要改动写死的默认值。
 </content>
