@@ -50,21 +50,28 @@ IS_MACOS=0
 
 # 进程/端口检测辅助函数（ps/lsof 实现；不用 pgrep/pkill——实测部分环境
 # pgrep -f 匹配不可靠，进程明明在跑却匹配不到，会导致清理失败、端口冲突）。
+# 每个函数末尾的 `|| true`：管道中间的 grep 在"没匹配到"时以状态 1 结束，
+# pipefail 下这会成为整条管道的退出码——"没找到进程"是这些函数最常见、
+# 完全正常的结果，不该被当成失败。这在 `for x in $(fn)` 或
+# `if [ -n "$(fn)" ]` 里不会出问题（那些上下文本就不受 errexit 影响），
+# 但一旦哪天改成 `X="$(fn)"` 这种裸赋值调用，没有 `|| true` 就会在"进程
+# 已经不在了"这个最常见的情况下，被 set -e 直接静默杀掉整个脚本、不打印
+# 任何错误——这正是启动后校验那段代码原本会撞上的坑。
 find_main_pids() { # 主进程 PID 列表
-  ps -axo pid=,args= | grep -F "/Applications/$APP_NAME/Contents/MacOS/$PRODUCT_NAME" | grep -v grep | awk '{print $1}'
+  ps -axo pid=,args= | grep -F "/Applications/$APP_NAME/Contents/MacOS/$PRODUCT_NAME" | grep -v grep | awk '{print $1}' || true
 }
 find_runtime_pids() { # runtime web 服务（孤儿化后仍占端口）PID 列表
-  ps -axo pid=,args= | grep -F "/Applications/$APP_NAME/Contents/Resources/runtime" | grep -v grep | awk '{print $1}'
+  ps -axo pid=,args= | grep -F "/Applications/$APP_NAME/Contents/Resources/runtime" | grep -v grep | awk '{print $1}' || true
 }
 # 探测 dsh web 服务实际使用的端口（优先从运行中的 web 进程命令行取，取不到回退 3080）
 find_web_port() {
   local port
   port="$(ps -axo args= | grep -F "/Applications/$APP_NAME/Contents/Resources/runtime" | grep -v grep \
-    | sed -nE 's/.*--port[ =]([0-9]+).*/\1/p' | head -1)"
+    | sed -nE 's/.*--port[ =]([0-9]+).*/\1/p' | head -1)" || true
   [ -n "$port" ] && echo "$port" || echo 3080
 }
 port_owner() { # 指定端口占用者 PID
-  lsof -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null
+  lsof -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null || true
 }
 
 echo "==> 1/6 拉取上游最新提交"
