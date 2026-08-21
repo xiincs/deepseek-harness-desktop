@@ -61,12 +61,29 @@ the shell — every shell action goes through the native menu/tray or the local 
 
 ```bash
 npm install
-npm run bundle        # fetch:node → prepare:runtime → tauri build
-# or step by step:
-npm run fetch:node    # downloads node.exe → src-tauri/resources/runtime
-DSH_RUNTIME_SOURCE=<node_modules root> npm run prepare:runtime  # copy a local runtime instead of npm install
-npm run build         # → src-tauri/target/release/bundle/nsis/DeepSeek Harness_<version>_x64-setup.exe
+npm run build          # tauri build auto-runs fetch:node + prepare:runtime first, see below
+# npm run bundle is the same thing spelled out explicitly — same effect
 ```
+
+`tauri.conf.json`'s `beforeBuildCommand` wires `fetch:node`/`prepare:runtime` into `tauri build`
+itself, so `npm run build`, `npm run tauri build`, and `cargo tauri build` all get it regardless of
+how they're invoked. This is deliberate: `src-tauri/resources/runtime` is a gitignored, manually
+generated artifact — before this hook existed, running `tauri build` directly (bypassing
+`npm run bundle`) would silently package whatever version happened to be sitting on disk, even if
+it had drifted from `DSH_VERSION_DEFAULT`. That drift is exactly what crashed a locally-installed
+build on startup with `error: unknown option '--no-open'`: its `resources/runtime` was still on the
+version from before `--no-open` was added, and nothing had ever forced the two back in sync.
+
+If you're substituting a local checkout for the npm registry (`DSH_RUNTIME_SOURCE`), carry that
+variable into the build step too, not just the manual `prepare:runtime` run — `beforeBuildCommand`
+re-runs `prepare:runtime` right before packaging, and without the variable it'll fetch fresh from
+the registry and clobber the local copy you just staged:
+
+```bash
+DSH_RUNTIME_SOURCE=<node_modules root> npm run build
+```
+
+Output: `src-tauri/target/release/bundle/nsis/DeepSeek Harness_<version>_x64-setup.exe`
 
 Before cutting a release, run `npm run check:dsh-version` — upstream is in developer preview and
 publishes new RCs without notice; this checks the pinned `@deepseek-ai/dsh` default (duplicated in
@@ -83,9 +100,11 @@ This app has two independent version numbers that must not be conflated:
   `prepare-runtime.mjs`) — the pinned `@deepseek-ai/dsh` release bundled inside the installer or
   installed on first use.
 
-**For a bundled-runtime install (the default, `npm run bundle`)** these travel together
-automatically: the NSIS installer's payload includes `resources/runtime/`, so a shell
-auto-update reinstalls the runtime pinned at build time along with it — there's no separate
+**For a bundled-runtime install (the default, `resources/runtime` packaged into the installer)**
+these travel together automatically: `tauri build`'s own `beforeBuildCommand` guarantees every
+package is preceded by a fresh `resources/runtime` install pinned to `DSH_VERSION_DEFAULT` (see
+"Building the installer" above), and the NSIS installer bundles that payload wholesale — so a
+shell auto-update reinstalls the runtime pinned at build time along with it. There's no separate
 runtime-update mechanism to build as long as `DSH_VERSION_DEFAULT` is bumped (and
 `check:dsh-version` passes) before cutting each shell release.
 

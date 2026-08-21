@@ -4,7 +4,8 @@
   "version": "1.5.1",
   "identifier": "dev.dsh.desktop",
   "build": {
-    "frontendDist": "../ui"
+    "frontendDist": "../ui",
+    "beforeBuildCommand": "npm run fetch:node && npm run prepare:runtime"
   },
   "app": {
     "withGlobalTauri": true,

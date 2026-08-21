@@ -61,12 +61,26 @@ harness 页面从 `http://127.0.0.1:<port>` 加载，故意**不**授予 Tauri I
 
 ```bash
 npm install
-npm run bundle        # fetch:node → prepare:runtime → tauri build
-# 或者分步执行：
-npm run fetch:node    # 下载 node.exe → src-tauri/resources/runtime
-DSH_RUNTIME_SOURCE=<node_modules 根目录> npm run prepare:runtime  # 用本地运行时代替 npm install
-npm run build         # → src-tauri/target/release/bundle/nsis/DeepSeek Harness_<version>_x64-setup.exe
+npm run build          # tauri build 前会自动跑 fetch:node + prepare:runtime，见下方原因
+# npm run bundle 是同一件事的显式别名，效果一样
 ```
+
+`tauri.conf.json` 的 `beforeBuildCommand` 把 `fetch:node`/`prepare:runtime` 接到了 `tauri build`
+本身之前，不管是 `npm run build`、`npm run tauri build` 还是 `cargo tauri build` 都逃不掉。这是刻意的：
+`src-tauri/resources/runtime` 是 gitignored、手动生成的产物，加这道 hook 之前，绕开 `npm run bundle`
+直接跑 `tauri build` 会静默打包磁盘上现有的版本，哪怕它跟 `DSH_VERSION_DEFAULT` 早就不一致——本地
+已装的应用启动就崩在过 `error: unknown option '--no-open'`，根源就是 `resources/runtime` 停在了改
+`--no-open` 之前的旧版本，从未被强制跟代码同步过。
+
+用本地 checkout 代替 npm registry 时（`DSH_RUNTIME_SOURCE`），这个变量在打包那一步也要带上，不能只加
+在手动跑的 `prepare:runtime` 上——`beforeBuildCommand` 打包前会再跑一次 `prepare:runtime`，没看到这
+个变量就会直接从 npm registry 重装，把刚暂存的本地版本覆盖掉：
+
+```bash
+DSH_RUNTIME_SOURCE=<node_modules 根目录> npm run build
+```
+
+打包产物：`src-tauri/target/release/bundle/nsis/DeepSeek Harness_<version>_x64-setup.exe`
 
 正式发布前先跑一下 `npm run check:dsh-version`——上游还在开发者预览阶段，会毫无预警地发布新的 RC；
 这个脚本会检查写死的 `@deepseek-ai/dsh` 默认版本号（在 `src-tauri/src/server.rs` 和
@@ -82,10 +96,11 @@ workflow 也会跑同一个检查，版本号对不上会直接让构建失败�
 - **运行时版本**（`server.rs` 里的 `DSH_VERSION_DEFAULT` / `prepare-runtime.mjs` 里的默认值）——
   打进安装包或首次运行时安装的那个 `@deepseek-ai/dsh` 版本。
 
-**对于内置运行时的安装方式（默认，即 `npm run bundle` 打出来的包）**，这两者会自动同步：NSIS 安装包
-的内容里包含 `resources/runtime/`，所以外壳的自动更新会连带把构建时打进去的那个运行时版本一起重装
-——只要在每次切外壳版本发布前把 `DSH_VERSION_DEFAULT` 更新好（并且 `check:dsh-version` 检查通过），
-就不需要另外再搭一套运行时更新机制。
+**对于内置运行时的安装方式（默认，即 `resources/runtime` 打进安装包）**，这两者会自动同步：`tauri
+build` 自身的 `beforeBuildCommand` 保证每次打包前都会用 `DSH_VERSION_DEFAULT` 重新装一遍
+`resources/runtime`（见上面"打包安装程序"），NSIS 安装包再把它整个打进去，所以外壳的自动更新会连带
+把构建时那个运行时版本一起重装——只要在每次切外壳版本发布前把 `DSH_VERSION_DEFAULT` 更新好（并且
+`check:dsh-version` 检查通过），就不需要另外再搭一套运行时更新机制。
 
 **对于托管（非内置）运行时的路径**——也就是没有 `resources/runtime/` 的场景（比如未打包的开发版，
 或者 `DSH_DESKTOP_RUNTIME_DIR` 指向了别处）——运行时只会在首次使用时通过 `npm install` 装一次
