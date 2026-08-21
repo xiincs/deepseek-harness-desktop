@@ -30,7 +30,7 @@ so it is fast and offline after the first run.
 | `DSH_DESKTOP_NODE` | Absolute path to `node.exe` to use instead of the one on `PATH` |
 | `DSH_DESKTOP_DSH_BIN` | Absolute path to a `dsh` `lib/bin.js` (e.g. a local checkout) |
 | `DSH_DESKTOP_RUNTIME_DIR` | Where the managed `@deepseek-ai/dsh` runtime is installed (default: app cache dir); point it at an existing `node_modules` root to skip the first-run npm install |
-| `DSH_DESKTOP_DSH_VERSION` | npm version spec for the managed runtime (default `0.1.0-rc.8`) |
+| `DSH_DESKTOP_DSH_VERSION` | npm version spec for the managed runtime (default `0.1.0-rc.7`) |
 | `DSH_DESKTOP_PORT` | Default bind port override (default `3080`); handy for running several instances |
 | `DSH_DESKTOP_CWD` | Working directory for the `dsh` server process (default: user home) |
 | `DSH_HOME` | Passed through to the server; harness data root (default `~/.dsh`) |
@@ -71,8 +71,8 @@ how they're invoked. This is deliberate: `src-tauri/resources/runtime` is a giti
 generated artifact — before this hook existed, running `tauri build` directly (bypassing
 `npm run bundle`) would silently package whatever version happened to be sitting on disk, even if
 it had drifted from `DSH_VERSION_DEFAULT`. That drift is exactly what crashed a locally-installed
-build on startup with `error: unknown option '--no-open'`: its `resources/runtime` was still on the
-version from before `--no-open` was added, and nothing had ever forced the two back in sync.
+build: its `resources/runtime` was stuck on an old version, nothing had ever forced the two back in
+sync, and the user ran straight into a command-line flag the bundled runtime didn't recognize.
 
 If you're substituting a local checkout for the npm registry (`DSH_RUNTIME_SOURCE`), carry that
 variable into the build step too, not just the manual `prepare:runtime` run — `beforeBuildCommand`

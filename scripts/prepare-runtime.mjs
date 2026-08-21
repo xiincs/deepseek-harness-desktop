@@ -4,7 +4,7 @@
 // milestone.
 //
 // Usage: node scripts/prepare-runtime.mjs
-// Env:   DSH_DESKTOP_DSH_VERSION  npm version spec (default 0.1.0-rc.8)
+// Env:   DSH_DESKTOP_DSH_VERSION  npm version spec (default 0.1.0-rc.7)
 //        DSH_RUNTIME_SOURCE       directory containing node_modules/@deepseek-ai/dsh
 //                                 (e.g. an existing npx cache root) — copies it
 //                                 locally instead of hitting the npm registry.
@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const runtimeDir = join(root, "src-tauri", "resources", "runtime");
-const version = process.env.DSH_DESKTOP_DSH_VERSION ?? "0.1.0-rc.8";
+const version = process.env.DSH_DESKTOP_DSH_VERSION ?? "0.1.0-rc.7";
 mkdirSync(runtimeDir, { recursive: true });
 
 const source = process.env.DSH_RUNTIME_SOURCE;
@@ -37,8 +37,13 @@ if (sourceBin && existsSync(sourceBin)) {
   // sidesteps that the same way a user's own shell would. runtimeDir and
   // version are ours (env var / hardcoded default), not attacker input, so
   // the shell-escaping caveat that comes with `shell: true` doesn't apply.
+  // No --prefer-offline: this registry republishes 0.x prerelease packages
+  // (including transitive deps, within their existing dist-tag ranges)
+  // multiple times a day, so a long-lived local npm cache can go stale
+  // within hours and resolve to a hard ETARGET for a version that exists
+  // on the real registry right now.
   execFileSync(
-    `npm install --prefix "${runtimeDir}" "@deepseek-ai/dsh@${version}" --omit=dev --no-audit --no-fund --no-progress --prefer-offline --fetch-retries=5 --fetch-retry-mintimeout=2000`,
+    `npm install --prefix "${runtimeDir}" "@deepseek-ai/dsh@${version}" --omit=dev --no-audit --no-fund --no-progress --fetch-retries=5 --fetch-retry-mintimeout=2000`,
     {
       stdio: "inherit",
       shell: true,

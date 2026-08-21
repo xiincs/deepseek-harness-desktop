@@ -39,7 +39,7 @@ pub const TRAY_ID: &str = "main-tray";
 pub const DEFAULT_PORT: u16 = 3080;
 
 /// Default npm version spec for the managed `@deepseek-ai/dsh` runtime.
-const DSH_VERSION_DEFAULT: &str = "0.1.0-rc.8";
+const DSH_VERSION_DEFAULT: &str = "0.1.0-rc.7";
 /// Marker found verbatim in the harness index page (served uncompressed).
 const INDEX_MARKER: &str = "DeepSeek Harness";
 /// Max lines kept in the in-memory log ring buffer.
@@ -447,6 +447,12 @@ fn install_runtime(app: &AppHandle, server: &Shared, rd: &Path) -> Result<(), St
         },
     );
     let prefix = plain_win_path(rd);
+    // No --prefer-offline: this registry republishes 0.x prerelease packages
+    // (including transitive deps, within their existing dist-tag ranges)
+    // multiple times a day. A long-lived local npm cache can go stale within
+    // hours and resolve to a hard ETARGET for a version that exists on the
+    // real registry right now — better to pay a live lookup than fail
+    // installs that should succeed.
     let mut cmd = npm_install_command(&[
         "install",
         "--prefix",
@@ -456,7 +462,6 @@ fn install_runtime(app: &AppHandle, server: &Shared, rd: &Path) -> Result<(), St
         "--no-audit",
         "--no-fund",
         "--no-progress",
-        "--prefer-offline",
         "--fetch-retries=5",
         "--fetch-retry-mintimeout=2000",
     ]);
@@ -1034,16 +1039,11 @@ fn spawn(app: &AppHandle, server: &Shared, node: &str, bin: &str, port: u16) -> 
 
     push_log(
         server,
-        format!("启动: {node} {bin} web --port {port} --no-open  (cwd: {cwd_plain})"),
+        format!("启动: {node} {bin} web --port {port}  (cwd: {cwd_plain})"),
     );
 
     let mut cmd = Command::new(node);
-    // --no-open: dsh 0.1.0-rc.8 added opening the host's default browser on
-    // `dsh web` startup (outside SSH). This shell is the intended surface —
-    // the harness page is loaded into our own window via the iframe above —
-    // so an extra system browser tab popping open alongside it is a visible
-    // regression, not a feature this app wants.
-    cmd.arg(bin).arg("web").arg("--port").arg(port.to_string()).arg("--no-open");
+    cmd.arg(bin).arg("web").arg("--port").arg(port.to_string());
     cmd.current_dir(&cwd_plain);
     // See `effective_path`: every tool call dsh shells out to on the
     // agent's behalf inherits this, so a stale/truncated PATH here doesn't

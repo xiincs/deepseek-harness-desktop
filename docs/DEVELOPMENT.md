@@ -30,7 +30,7 @@ npm run tauri dev    # 编译 Rust 外壳并打开应用窗口
 | `DSH_DESKTOP_NODE` | 指定 `node.exe` 的绝对路径，代替 `PATH` 上那个 |
 | `DSH_DESKTOP_DSH_BIN` | 指定某个 `dsh` `lib/bin.js` 的绝对路径（比如本地某个 checkout） |
 | `DSH_DESKTOP_RUNTIME_DIR` | 托管的 `@deepseek-ai/dsh` 运行时安装位置（默认是应用缓存目录）；指向一个已有的 `node_modules` 根目录可以跳过首次的 npm install |
-| `DSH_DESKTOP_DSH_VERSION` | 托管运行时使用的 npm 版本号（默认 `0.1.0-rc.8`） |
+| `DSH_DESKTOP_DSH_VERSION` | 托管运行时使用的 npm 版本号（默认 `0.1.0-rc.7`） |
 | `DSH_DESKTOP_PORT` | 默认绑定端口覆盖（默认 `3080`）；同时跑多个实例时很有用 |
 | `DSH_DESKTOP_CWD` | `dsh` 服务进程的工作目录（默认是用户主目录） |
 | `DSH_HOME` | 透传给服务端；harness 数据根目录（默认 `~/.dsh`） |
@@ -69,8 +69,8 @@ npm run build          # tauri build 前会自动跑 fetch:node + prepare:runtim
 本身之前，不管是 `npm run build`、`npm run tauri build` 还是 `cargo tauri build` 都逃不掉。这是刻意的：
 `src-tauri/resources/runtime` 是 gitignored、手动生成的产物，加这道 hook 之前，绕开 `npm run bundle`
 直接跑 `tauri build` 会静默打包磁盘上现有的版本，哪怕它跟 `DSH_VERSION_DEFAULT` 早就不一致——本地
-已装的应用启动就崩在过 `error: unknown option '--no-open'`，根源就是 `resources/runtime` 停在了改
-`--no-open` 之前的旧版本，从未被强制跟代码同步过。
+已装的应用就是这么崩的：`resources/runtime` 停在了旧版本，从未被强制跟代码同步过，用户直接撞见运行时
+根本不认识的命令行参数。
 
 用本地 checkout 代替 npm registry 时（`DSH_RUNTIME_SOURCE`），这个变量在打包那一步也要带上，不能只加
 在手动跑的 `prepare:runtime` 上——`beforeBuildCommand` 打包前会再跑一次 `prepare:runtime`，没看到这
