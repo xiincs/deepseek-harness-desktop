@@ -11,6 +11,8 @@ mod menu;
 mod panel;
 mod server;
 mod terminal;
+#[cfg(windows)]
+mod window_proc;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -941,6 +943,11 @@ pub fn run() {
                 allow_clipboard_permission(&win);
                 inject_file_mention_bridge(&win);
                 install_external_link_handlers(&handle, &win);
+                // Windows-only: makes the maximized window's top strip
+                // deliver hover/click to the web content instead of a
+                // resize cursor — see window_proc.rs.
+                #[cfg(windows)]
+                window_proc::patch_maximized_hit_test(&win);
             }
 
             // `decorations: false` in tauri.conf.json gives the frameless
