@@ -6,6 +6,14 @@
 #   scripts/sync-upstream.sh              # 同步 + 重建 + 重装（仅 macOS 重装）
 #   scripts/sync-upstream.sh --no-install # 只同步 + 重建
 #   scripts/sync-upstream.sh --runtime    # 上游更新了捆绑的 dsh/Node 运行时
+#   scripts/sync-upstream.sh --install-detached  # 内部标记：由 launchd 独立执行安装
+#
+# 运行环境（重要）：
+#   若从应用自带的 Web 界面/内置终端里运行本脚本，当前进程是应用 runtime 的
+#   子进程——第 6/6 步杀掉应用时会把脚本自己也切断（工具调用中断、无输出、
+#   "没有后文"）。脚本会自动检测该环境（见 is_under_app_runtime），并把
+#   macOS 安装步骤改由 launchd 独立任务执行（系统 PID 1 托管，完全脱离应用
+#   进程树），界面短暂断开后由新版自动恢复。
 #
 # 安全设计（评审意见驱动）：
 #   - 构建失败立即终止（PIPESTATUS 取真实退出码，绝不用 `|| true` 吞错），
@@ -26,10 +34,12 @@ cd "$REPO_DIR"
 
 DO_INSTALL=1
 DO_RUNTIME=0
+INSTALL_DETACHED=0
 for arg in "$@"; do
   case "$arg" in
     --no-install) DO_INSTALL=0 ;;
     --runtime) DO_RUNTIME=1 ;;
+    --install-detached) INSTALL_DETACHED=1 ;;
     *) echo "未知参数: $arg" >&2; exit 1 ;;
   esac
 done
@@ -47,6 +57,56 @@ PRODUCT_NAME=$(node -p "require('./src-tauri/tauri.conf.json').productName")
 APP_NAME="$PRODUCT_NAME.app"
 IS_MACOS=0
 [ "$(uname)" = "Darwin" ] && IS_MACOS=1
+
+# 运行环境检测：当前进程是否在应用 runtime 进程树之下？
+# 逐级向上追溯祖先进程，若任一祖先的执行路径含应用的 runtime 目录则为真。
+# 用于判断"从应用内置终端/Web 界面运行"这一会自切断的场景。
+is_under_app_runtime() {
+  local pid="$$" cmd
+  while [ -n "$pid" ] && [ "$pid" != "1" ]; do
+    cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+    if echo "$cmd" | grep -Fq "/Applications/$APP_NAME/Contents/Resources/runtime"; then
+      return 0
+    fi
+    pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+  done
+  return 1
+}
+
+# 脱离进程树执行：把当前脚本以 launchd 独立任务方式重新调度（macOS only）。
+# 由系统 launchd（PID 1）托管，杀掉应用不会影响它。传入 --install-detached
+# 标记防止递归调度。仅当检测到在应用 runtime 下运行且需要安装时调用。
+relaunch_detached_via_launchd() {
+  local label="com.tangmm.dsh-sync-upstream" plist
+  plist="$HOME/Library/LaunchAgents/${label}.plist"
+  cat > "$plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>${label}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>$(pwd)/scripts/sync-upstream.sh</string>
+        <string>--install-detached</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/dsh-sync-upstream-launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/dsh-sync-upstream-launchd.log</string>
+</dict>
+</plist>
+EOF
+  launchctl unload "$plist" 2>/dev/null || true
+  rm -f /tmp/dsh-sync-upstream-launchd.log
+  launchctl load "$plist"
+  echo "    已提交给 launchd 独立任务 (${label})，界面将短暂断开，新版启动后自动恢复。"
+  echo "    日志: /tmp/dsh-sync-upstream-launchd.log"
+}
 
 # 进程/端口检测辅助函数（ps/lsof 实现；不用 pgrep/pkill——实测部分环境
 # pgrep -f 匹配不可靠，进程明明在跑却匹配不到，会导致清理失败、端口冲突）。
@@ -151,6 +211,15 @@ if [ "$DO_INSTALL" -eq 1 ] && [ "$IS_MACOS" -eq 1 ]; then
   if [ ! -d "$BUNDLE" ] || [ ! -x "$BUNDLE/Contents/MacOS/$PRODUCT_NAME" ]; then
     echo "中止：未找到有效的新构建产物 $BUNDLE ——旧安装保持不变。" >&2
     exit 1
+  fi
+  # 运行环境保护：若从应用内置终端/Web 界面运行（当前进程是应用 runtime 的
+  # 子进程），直接执行安装会在杀掉应用时切断脚本自身。此时把安装交给
+  # launchd 独立任务（--install-detached），本进程只负责提交并退出。
+  if [ "$INSTALL_DETACHED" -eq 0 ] && is_under_app_runtime; then
+    echo "==> 6/6 检测到在应用进程树内运行，切换为 launchd 独立安装..."
+    relaunch_detached_via_launchd
+    echo "    本进程退出（安装由系统独立托管，请勿重复运行本脚本）"
+    exit 0
   fi
   echo "==> 6/6 彻底退出运行中的实例并替换 /Applications"
   # 与 CLAUDE.md 里 Windows 侧 "taskkill /F /T" 同样的原则：必须连子进程一起清理。
