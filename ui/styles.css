@@ -140,7 +140,13 @@ body {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  padding: 6px 10px;
+  /* No top/bottom/right padding: #window-controls must sit flush against
+     the window's top and right edges (OS-caption-button behavior, so the
+     corner-click gesture keeps working when maximized — see the
+     window-controls comment below). The button clusters restore their own
+     vertical breathing room via padding on #toolbar-left/#toolbar-actions
+     instead, so the bar height is unchanged. */
+  padding: 0 0 0 10px;
   background: var(--sidebar-bg);
   border-bottom: 1px solid var(--card-border);
   /* Anchors #toolbar-title's absolute centering below. */
@@ -186,6 +192,8 @@ body {
   display: flex;
   align-items: center;
   flex-shrink: 0;
+  /* Vertical padding restored from #toolbar — see #toolbar-actions. */
+  padding: 6px 0;
 }
 
 #toolbar-actions {
@@ -194,6 +202,10 @@ body {
   gap: 4px;
   flex-shrink: 0;
   margin-left: auto;
+  /* Vertical padding restored from #toolbar (now edge-to-edge for the
+     window controls); the right 10px keeps the old 20px gap to
+     #window-controls' divider (10px here + its 10px margin-left). */
+  padding: 6px 10px 6px 0;
 }
 
 /* macOS restores the native title bar (see app.js's initWindowChrome), so
@@ -358,12 +370,26 @@ body.platform-decorated #toolbar-actions {
 }
 
 /* ── window controls: our own minimize/maximize/close, replacing the OS's ── */
+/*
+   These replace the OS caption buttons on the frameless Windows/Linux
+   builds, so they behave like OS caption buttons: full bar height, no
+   corner radius, and flush against the window's top/right edges (the
+   toolbar above carries no top/right padding of its own). With the window
+   maximized the close button's hover/click zone therefore reaches the
+   actual screen corner, preserving the muscle-memory "fling the mouse to
+   the top-right corner and click" gesture real title bars train. Width is
+   the Windows-standard 46px caption-button hit target, not the 30px icon-
+   button size the toolbar's other controls use.
+*/
 
 #window-controls {
   display: flex;
   align-items: center;
   gap: 2px;
   flex-shrink: 0;
+  /* Stretch to the bar's full height so the buttons can span top to
+     bottom edge (see .window-btn's height below). */
+  align-self: stretch;
   margin-left: 10px;
   padding-left: 10px;
   border-left: 1px solid var(--card-border);
@@ -373,12 +399,16 @@ body.platform-decorated #toolbar-actions {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 26px;
+  width: 46px;
+  /* Full bar height — #window-controls's stretch above fixes the row
+     height, so 100% makes each button span edge to edge, top to bottom. */
+  height: 100%;
   padding: 0;
   background: transparent;
   border: none;
-  border-radius: 6px;
+  /* No radius: a rounded corner would leave a dead zone right where the
+     screen corner is — the hover fill must cover the exact corner pixel. */
+  border-radius: 0;
   cursor: pointer;
   color: var(--muted);
 }
