@@ -1139,11 +1139,24 @@ fn spawn(app: &AppHandle, server: &Shared, node: &str, bin: &str, port: u16) -> 
 
     push_log(
         server,
-        format!("启动: {node} {bin} web --port {port}  (cwd: {cwd_plain})"),
+        format!("启动: {node} {bin} web --port {port} --no-open  (cwd: {cwd_plain})"),
     );
 
     let mut cmd = Command::new(node);
-    cmd.arg(bin).arg("web").arg("--port").arg(port.to_string());
+    // --no-open: dsh's web-app bundle opens the host's default browser on
+    // startup (outside SSH) unless told not to. This shell is the intended
+    // surface — the harness page is loaded into our own window via the
+    // iframe above — so an extra system browser tab popping open alongside
+    // it is a visible regression, not a feature this app wants. This was
+    // added once already (0.1.0-rc.8) and dropped when that version got
+    // reverted for being unpromoted upstream, because rc.7's CLI didn't
+    // recognize the flag at all ("unknown option '--no-open'" — a hard
+    // startup crash, not a no-op). Confirmed directly against the currently
+    // pinned 0.1.1-rc.2 (`node bin.js web --port <scratch> --no-open`) before
+    // re-adding: starts cleanly, suppresses the browser-open log line, no
+    // "unknown option" error — safe on this version specifically, which is
+    // the part that broke last time.
+    cmd.arg(bin).arg("web").arg("--port").arg(port.to_string()).arg("--no-open");
     cmd.current_dir(&cwd_plain);
     // See `effective_path`: every tool call dsh shells out to on the
     // agent's behalf inherits this, so a stale/truncated PATH here doesn't
