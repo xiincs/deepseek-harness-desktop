@@ -596,7 +596,23 @@ pub fn install_plugin(app: &AppHandle, server: &Shared, package: &str) -> Result
     };
 
     let mut cmd = Command::new(&node);
-    cmd.arg(&bin).arg("plugin").arg("--profile").arg("web").arg("add").arg(package);
+    // -w (forwarded to pnpm as --workspace-root): dsh scaffolds every
+    // profile directory as a single-package pnpm workspace (`packages: [.]`
+    // in its own generated pnpm-workspace.yaml — not something dsh-desktop
+    // creates), and dsh's own `plugin add` never passes pnpm the flag that
+    // acknowledges this. Without it, pnpm refuses outright with
+    // ERR_PNPM_ADDING_TO_ROOT ("Running this command will add the
+    // dependency to the workspace root... if you really meant it, make it
+    // explicit by running this command again with the -w flag") — every
+    // plugin-market install fails this way on the currently pinned dsh
+    // version. Confirmed directly (`dsh plugin --profile web add -w
+    // <pkg>` against a real profile) before adding: installs cleanly.
+    // `dsh plugin`'s own arguments are forwarded to pnpm verbatim, so this
+    // rides along with no other change needed. `heal_missing_plugin`'s
+    // `remove` doesn't need the same flag — pnpm's workspace-root guard
+    // only exists for `add` (which package.json would a *new* dependency
+    // even go into?); removing an already-declared one is unambiguous.
+    cmd.arg(&bin).arg("plugin").arg("--profile").arg("web").arg("add").arg("-w").arg(package);
     // Same PATH rebuild as the server process itself — pnpm needs a real
     // PATH to find node/git, not whatever this GUI process happened to
     // inherit at launch. See `effective_path`'s own doc comment.
