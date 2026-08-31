@@ -1258,6 +1258,59 @@ body.platform-decorated #toolbar-actions {
   opacity: 0.85;
 }
 
+/* ── close-choice dialog: same card/overlay treatment as #confirm-dialog ── */
+
+#close-choice-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+#close-choice-overlay.hidden {
+  display: none;
+}
+
+#close-choice-dialog {
+  width: min(360px, 100%);
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+  padding: 20px;
+  animation: boot-card-enter 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+#close-choice-message {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+#close-choice-remember-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+#close-choice-remember {
+  margin: 0;
+}
+
+#close-choice-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* ── resize handle: draggable, persisted dock-vs-content split ── */
 
 /* A real 8px-wide flex item (not a thin line widened via a negative-margin

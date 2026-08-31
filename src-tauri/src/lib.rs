@@ -14,17 +14,17 @@ mod terminal;
 #[cfg(windows)]
 mod window_proc;
 
+use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
 use tauri::menu::CheckMenuItem;
-use tauri::{AppHandle, Manager, RunEvent, State, WindowEvent, Wry};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WindowEvent, Wry};
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt as _, Modifiers, Shortcut, ShortcutState};
-use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::UpdaterExt;
 
@@ -49,10 +49,55 @@ fn requested_workspace(args: &[String]) -> Option<std::path::PathBuf> {
 
 use server::{DshServer, ServerStatus};
 
+/// The user's remembered choice for what the window's close button (X)
+/// should do, persisted across restarts once they've explicitly picked one
+/// in the close-confirmation dialog and checked "remember". `None` — the
+/// default, and also what a missing/corrupt settings file falls back to —
+/// means "ask every time"; see `WindowEvent::CloseRequested` below.
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum CloseAction {
+    Minimize,
+    Quit,
+}
+
+/// Settings file holding the remembered `CloseAction`, if any — lives
+/// alongside the persistent desktop log (`app_log_dir()`; confirmed to
+/// resolve correctly for both packaged and unpackaged builds, unlike
+/// `app_cache_dir()` — see server.rs's `runtime_dir` doc comment), not
+/// inside `~/.dsh`, which is dsh's own data directory (a different
+/// project's domain — see this crate's module doc).
+fn close_action_settings_path(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_log_dir().ok().map(|dir| dir.join("close-action.json"))
+}
+
+/// Reads the remembered close action, if any was ever saved. Any failure
+/// (missing file, unreadable, malformed JSON) is treated the same as "never
+/// saved one" — this is a convenience default, not data worth surfacing an
+/// error over.
+fn load_close_action(app: &AppHandle) -> Option<CloseAction> {
+    let path = close_action_settings_path(app)?;
+    let text = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// Persists the remembered close action for future launches.
+fn save_close_action(app: &AppHandle, action: CloseAction) {
+    let Some(path) = close_action_settings_path(app) else { return };
+    if let Some(dir) = path.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    if let Ok(text) = serde_json::to_string(&action) {
+        let _ = fs::write(path, text);
+    }
+}
+
 pub struct AppState {
     pub server: Arc<Mutex<DshServer>>,
-    /// Whether the one-time "minimized to tray" notice has fired this run.
-    hide_notice_shown: AtomicBool,
+    /// The remembered answer to "what should the close button do", loaded
+    /// from disk at startup (see `load_close_action`) and updated by the
+    /// `resolve_close_choice` command whenever the user checks "remember".
+    close_action: Mutex<Option<CloseAction>>,
     /// The tray's "开机自动启动" checkbox — kept here so
     /// `MENU_TOGGLE_AUTOSTART` can sync its visual state after toggling
     /// (clicking a `CheckMenuItem` doesn't flip its own display automatically).
@@ -60,6 +105,29 @@ pub struct AppState {
 }
 
 // ── commands (called only from the local boot page) ─────────────────────────
+
+/// Carries out the user's answer to the close-confirmation dialog (shown in
+/// response to the `request-close-choice` event — see
+/// `WindowEvent::CloseRequested`). `remember` persists the choice via
+/// `save_close_action` so future closes this run *and* future launches skip
+/// the dialog entirely and just do it; leaving it unchecked means this
+/// answer covers only the close that's happening right now.
+#[tauri::command]
+fn resolve_close_choice(app: AppHandle, quit: bool, remember: bool) {
+    let action = if quit { CloseAction::Quit } else { CloseAction::Minimize };
+    if remember {
+        *app.state::<AppState>().close_action.lock().unwrap() = Some(action);
+        save_close_action(&app, action);
+    }
+    match action {
+        CloseAction::Minimize => {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.hide();
+            }
+        }
+        CloseAction::Quit => app.exit(0),
+    }
+}
 
 #[tauri::command]
 fn get_status(state: State<'_, AppState>) -> ServerStatus {
@@ -828,6 +896,27 @@ pub fn run() {
         }
     }
 
+    // Created here rather than inside `.setup()` (its previous home) so the
+    // panic hook below can close over it too — `.setup()` doesn't run until
+    // the event loop is already live, which is too late to cover a panic
+    // during the builder chain itself, however unlikely.
+    let srv = Arc::new(Mutex::new(DshServer::default()));
+
+    // Every *normal* quit path (window close, tray 退出, updater restart)
+    // funnels through `RunEvent::ExitRequested` below, which tears the dsh
+    // child process down. A panic doesn't: it unwinds past that entirely,
+    // and if it happens to take down the event-loop thread, the child is
+    // orphaned with zero cleanup. This is the safety net — best-effort, but
+    // strictly better than nothing. Chains the previous hook (Tauri/the
+    // default runtime's own) rather than replacing it, so panic messages
+    // still get logged/reported the same as before.
+    server::init_panic_cleanup(srv.clone());
+    let previous_panic_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        server::cleanup_on_panic();
+        previous_panic_hook(info);
+    }));
+
     tauri::Builder::default()
         // Must be the first plugin registered: it needs to claim the
         // single-instance lock before anything else in the builder chain
@@ -883,6 +972,7 @@ pub fn run() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
+            resolve_close_choice,
             get_status,
             get_info,
             start_server,
@@ -918,7 +1008,7 @@ pub fn run() {
             terminal::terminal_resize,
             terminal::terminal_close
         ])
-        .setup(|app| {
+        .setup(move |app| {
             let handle = app.handle().clone();
 
             // Persistent log file for the desktop shell itself.
@@ -926,10 +1016,13 @@ pub fn run() {
                 server::init_log_file(log_dir.join("desktop.log"));
             }
 
-            // Built directly rather than via `app.state()` — AppState isn't
-            // `manage()`d until below, once `build_tray` has handed back the
-            // autostart checkbox it needs to be constructed with.
-            let srv = Arc::new(Mutex::new(DshServer::default()));
+            // `srv` itself (not a fresh one — `AppState` isn't `manage()`d
+            // until below, once `build_tray` has handed back the autostart
+            // checkbox it needs to be constructed with) is the same instance
+            // the panic hook above already closed over, created before this
+            // closure so both share one server rather than racing to set up
+            // two independent ones.
+            let close_action = Mutex::new(load_close_action(&handle));
 
             // The container page (ui/) hosts the harness in an <iframe> and
             // never navigates its own top level — these WebView2-level
@@ -982,7 +1075,7 @@ pub fn run() {
 
             app.manage(AppState {
                 server: srv.clone(),
-                hide_notice_shown: AtomicBool::new(false),
+                close_action,
                 autostart_item,
             });
             app.manage(terminal::TerminalState::default());
@@ -996,29 +1089,30 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                // Tray-resident mode: closing the window hides it but leaves
-                // the dsh server running in the background. Quitting (⌘Q /
-                // tray 退出) tears the server down in the ExitRequested
-                // handler and then exits the process.
+                // Always intercept the raw OS-level close — what actually
+                // happens next (minimize to tray, or quit) is decided below,
+                // never by letting this proceed unprompted.
                 api.prevent_close();
-                let _ = window.hide();
-
                 let app = window.app_handle();
-                let state = app.state::<AppState>();
-                if state.hide_notice_shown.swap(true, Ordering::Relaxed) {
-                    return;
+                let remembered = *app.state::<AppState>().close_action.lock().unwrap();
+                match remembered {
+                    Some(CloseAction::Minimize) => {
+                        let _ = window.hide();
+                    }
+                    Some(CloseAction::Quit) => {
+                        // Quitting (⌘Q / tray 退出 / a remembered "quit" here)
+                        // all tear the server down in the ExitRequested
+                        // handler below and then exit the process.
+                        app.exit(0);
+                    }
+                    // No remembered choice yet: ask, via a dialog on the boot
+                    // page — resolve_close_choice carries out whatever the
+                    // user picks. Don't hide or quit here; either would race
+                    // ahead of the user's actual answer.
+                    None => {
+                        let _ = app.emit("request-close-choice", ());
+                    }
                 }
-                let lang = i18n::detect();
-                let _ = app
-                    .notification()
-                    .builder()
-                    .title(i18n::tr(lang, "DeepSeek Harness 已转入后台", "DeepSeek Harness is running in the background"))
-                    .body(i18n::tr(
-                        lang,
-                        "服务仍在运行；从系统托盘图标可重新打开窗口或退出。",
-                        "The service is still running. Use the tray icon to reopen the window or quit.",
-                    ))
-                    .show();
             }
         })
         .on_menu_event(|app, event| handle_menu_action(app, event.id.as_ref()))

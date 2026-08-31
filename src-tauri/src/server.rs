@@ -85,6 +85,43 @@ fn append_log_file(line: &str) {
     }
 }
 
+/// Holds the shared server state so a panic hook — installed at process
+/// startup, before any window or Tauri state exists — can still reach the
+/// tracked child pid from whatever thread happens to panic. Set once via
+/// [`init_panic_cleanup`]. A plain global rather than something threaded
+/// through `AppHandle`: a panic hook has no access to Tauri's managed state,
+/// only whatever it closed over at `set_hook` time.
+static PANIC_CLEANUP_SERVER: OnceLock<Shared> = OnceLock::new();
+
+/// Registers the server state for [`cleanup_on_panic`] to use. Called once
+/// at startup, before the panic hook is installed.
+pub fn init_panic_cleanup(server: Shared) {
+    let _ = PANIC_CLEANUP_SERVER.set(server);
+}
+
+/// Best-effort child-process cleanup for an unhandled panic. Every *normal*
+/// quit path (window close, tray 退出, updater restart) funnels through
+/// `RunEvent::ExitRequested` in lib.rs, which calls `stop()` — but a panic
+/// unwinds past that entirely; if it happens to take down the event-loop
+/// thread, `ExitRequested` never fires and the dsh child process is
+/// silently orphaned with no cleanup at all. This is the safety net,
+/// installed as the process's panic hook.
+///
+/// Tolerates a poisoned mutex on purpose: the panic that triggered this
+/// call may itself have happened on a different thread while that thread
+/// held this exact lock (this app has many background readers/watchers
+/// all doing `server.lock().unwrap()`), which is precisely the scenario
+/// this hook exists for — recovering the guard via `into_inner()` still
+/// gets a real (if possibly mid-update) pid to kill, which is strictly
+/// better than giving up because the data might be stale.
+pub fn cleanup_on_panic() {
+    let Some(server) = PANIC_CLEANUP_SERVER.get() else { return };
+    let pid = server.lock().unwrap_or_else(|e| e.into_inner()).pid;
+    if let Some(pid) = pid {
+        kill_process_tree(pid);
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum ServerStatus {

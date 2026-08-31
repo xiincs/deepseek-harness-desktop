@@ -97,6 +97,10 @@ const els = {
   confirmDialogInput: document.getElementById("confirm-dialog-input"),
   btnConfirmDialogCancel: document.getElementById("btn-confirm-dialog-cancel"),
   btnConfirmDialogOk: document.getElementById("btn-confirm-dialog-ok"),
+  closeChoiceOverlay: document.getElementById("close-choice-overlay"),
+  closeChoiceRemember: document.getElementById("close-choice-remember"),
+  btnCloseChoiceMinimize: document.getElementById("btn-close-choice-minimize"),
+  btnCloseChoiceQuit: document.getElementById("btn-close-choice-quit"),
 };
 
 // ── i18n ─────────────────────────────────────────────────────────────────
@@ -146,6 +150,10 @@ const STRINGS = {
       "首次使用提示：默认使用 DeepSeek 官方模型。如需接入 OpenAI / Anthropic / Gemini " +
       "等其他模型，进入后可在「设置 → 模型 → 添加提供方」中配置，随时可改。",
     gotIt: "知道了",
+    closeChoiceMessage: "要将 DeepSeek Harness 最小化到系统托盘（服务继续在后台运行），还是直接退出？",
+    closeChoiceRemember: "记住我的选择，以后不再询问",
+    closeChoiceMinimize: "最小化到托盘",
+    closeChoiceQuit: "退出",
     startupFailed: "启动失败",
     retry: "重试",
     refreshTreeTitle: "刷新文件树与 Git 状态",
@@ -273,6 +281,10 @@ const STRINGS = {
       "First time here: DeepSeek's official models are used by default. To add OpenAI / Anthropic / " +
       "Gemini or other providers, go to Settings → Models → Add Provider after launch — you can change this anytime.",
     gotIt: "Got It",
+    closeChoiceMessage: "Minimize DeepSeek Harness to the system tray (the service keeps running in the background), or quit?",
+    closeChoiceRemember: "Remember my choice, don't ask again",
+    closeChoiceMinimize: "Minimize to Tray",
+    closeChoiceQuit: "Quit",
     startupFailed: "Startup Failed",
     retry: "Retry",
     refreshTreeTitle: "Refresh file tree and Git status",
@@ -2980,6 +2992,23 @@ async function init() {
       // anyway (e.g. a post-install warning unrelated to the binary itself).
       if (!els.pluginMarketConfirm.classList.contains("hidden")) refreshPnpmGate();
     }
+  });
+  // Fired by WindowEvent::CloseRequested (lib.rs) whenever there's no
+  // remembered close-action yet — once the user picks one via
+  // resolve_close_choice and checks "remember", this stops firing entirely
+  // (Rust applies the remembered choice directly, no round trip here).
+  listen("request-close-choice", () => {
+    els.closeChoiceRemember.checked = false;
+    els.closeChoiceOverlay.classList.remove("hidden");
+    els.btnCloseChoiceMinimize.focus();
+  });
+  els.btnCloseChoiceMinimize.addEventListener("click", () => {
+    els.closeChoiceOverlay.classList.add("hidden");
+    invoke("resolve_close_choice", { quit: false, remember: els.closeChoiceRemember.checked });
+  });
+  els.btnCloseChoiceQuit.addEventListener("click", () => {
+    els.closeChoiceOverlay.classList.add("hidden");
+    invoke("resolve_close_choice", { quit: true, remember: els.closeChoiceRemember.checked });
   });
   els.btnRetry.addEventListener("click", () => {
     els.btnRetry.disabled = true;
