@@ -821,6 +821,106 @@ fn heal_stale_symlink(app: &AppHandle, server: &Shared, path: &Path) -> bool {
     }
 }
 
+// ── self-heal: missing marketplace plugin files ─────────────────────────────
+
+/// Extracts the plugin name from a dsh boot error caused by a
+/// marketplace-installed plugin's compiled entry file going missing from
+/// disk (interrupted `pnpm add`, or something else deleting it after the
+/// fact) — the cordis loader treats any single unresolvable plugin entry as
+/// fatal for the *whole* plugin tree, so this crashes `dsh web` outright
+/// (same failure class as upstream
+/// deepseek-ai/deepseek-harness#880/#2603, unfixed as of writing). Observed
+/// shape, captured verbatim from a real user's log
+/// (dsh-desktop issue #41):
+/// `Cannot find module 'C:\Users\x\.dsh\extension-manager\plugins\dsh-plugin-sodamem\dist\cjs\index.js' imported from ...`
+/// Anchored on the real `<dsh_home>/extension-manager/plugins/` filesystem
+/// prefix rather than the surrounding English error prose — same
+/// safety-fence approach as `heal_stale_symlink` above, and more stable
+/// across upstream wording changes than matching on message text. Takes the
+/// prefix pre-computed (rather than an `AppHandle` to derive it from) so
+/// this stays pure text parsing, same as `extract_stale_symlink_path` —
+/// callers compute it once via `dsh_home_dir` instead of paying for it on
+/// every line scanned.
+fn extract_missing_plugin_name(plugins_dir: &Path, line: &str) -> Option<String> {
+    let prefix = plugins_dir.to_string_lossy();
+    let idx = line.find(prefix.as_ref())?;
+    let rest = &line[idx + prefix.len()..];
+    let rest = rest.strip_prefix(['\\', '/'])?;
+    let end = rest.find(['\\', '/'])?;
+    let name = &rest[..end];
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+/// Removes a marketplace plugin whose compiled entry file is missing from
+/// disk (see `extract_missing_plugin_name`) via dsh's own supported `plugin
+/// remove` command — not a direct edit to the profile's package.json/bundles
+/// list. A related upstream report (deepseek-ai/deepseek-harness#3263)
+/// documents that dsh's own reconcile logic can silently re-add a package to
+/// `bundles` on the next plugin-market install/update if it's still listed
+/// as a dependency — hand-editing the config directly would fight that
+/// logic instead of going through it; `dsh plugin remove` forwards to `pnpm
+/// remove` and lets dsh reconcile both `dependencies` and `bundles`
+/// consistently in one step (confirmed against the published CLI source,
+/// `@deepseek-ai/dsh`'s `lib/bin.js`: `plugin` forwards its arguments
+/// verbatim to pnpm in the profile directory; its own help text lists
+/// `remove <pkg>` as a supported form).
+///
+/// Runs synchronously (unlike `install_plugin`, which streams progress to
+/// the UI for a user-triggered install) since this is called from
+/// `start_inner`'s own blocking retry loop. Shares `plugin_install_pid` with
+/// `install_plugin` — both are `dsh plugin --profile web <verb>` mutations
+/// against the same profile, and must not run concurrently: the dock's
+/// plugin market is a native panel independent of the iframe, so a user can
+/// trigger an install even while the main service is stuck in a
+/// boot-failure retry loop. If the lock is already held, this returns
+/// `false` without touching anything — not counted as a failed heal
+/// attempt, since nothing was actually tried; the retry loop's own polling
+/// naturally re-checks on the next tick once the lock frees up. Doesn't need
+/// an `AppHandle`: the safety fence (is this path actually a
+/// marketplace-plugin location?) already happened one step upstream, in
+/// `extract_missing_plugin_name` — by the time a name reaches here it's
+/// already known to have come from the expected `extension-manager/plugins`
+/// location.
+fn heal_missing_plugin(server: &Shared, node: &str, bin: &str, name: &str) -> bool {
+    {
+        let mut s = server.lock().unwrap();
+        if s.plugin_install_pid.is_some() {
+            return false;
+        }
+        s.plugin_install_pid = Some(0);
+    }
+    push_log(server, format!("检测到插件 {name} 的文件缺失，正在自动移除以恢复启动…"));
+    let mut cmd = Command::new(node);
+    cmd.arg(bin).arg("plugin").arg("--profile").arg("web").arg("remove").arg(name);
+    cmd.env("PATH", effective_path());
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    own_process_group(&mut cmd);
+    hide_console(&mut cmd);
+    let result = cmd.status();
+    server.lock().unwrap().plugin_install_pid = None;
+    match result {
+        Ok(status) if status.success() => {
+            push_log(
+                server,
+                format!("已自动移除插件 {name}（文件缺失，可能是安装未完成或被外部程序删除）。如需继续使用请重新安装。"),
+            );
+            true
+        }
+        Ok(status) => {
+            push_log(server, format!("自动移除插件 {name} 失败(exit {:?})。", status.code()));
+            false
+        }
+        Err(e) => {
+            push_log(server, format!("自动移除插件 {name} 失败：{e}"));
+            false
+        }
+    }
+}
+
 // ── PATH ─────────────────────────────────────────────────────────────────────
 
 /// A GUI app launched from Explorer/Start Menu inherits whatever `PATH` its
@@ -1283,15 +1383,23 @@ fn start_inner(app: &AppHandle, server: &Shared) -> Result<(), String> {
     // forever.
     let ready_deadline = Instant::now() + READY_TIMEOUT;
     let mut heal_attempts = 0u32;
+    // Counted separately from `heal_attempts` above: a single boot attempt
+    // can plausibly need to clear a stale symlink *and* remove a broken
+    // plugin, and one heal class exhausting its budget shouldn't starve the
+    // other.
+    let mut plugin_heal_attempts = 0u32;
+    let plugins_dir = dsh_home_dir(app).join("extension-manager").join("plugins");
     loop {
-        let (running, exited, eaddr, stale_symlink) = {
+        let (running, exited, eaddr, stale_symlink, missing_plugin) = {
             let s = server.lock().unwrap();
             let stale_symlink = s.logs.iter().rev().find_map(|l| extract_stale_symlink_path(l));
+            let missing_plugin = s.logs.iter().rev().find_map(|l| extract_missing_plugin_name(&plugins_dir, l));
             (
                 matches!(s.status, ServerStatus::Running { .. }),
                 s.pid.is_none(),
                 s.logs.iter().any(|l| l.contains("EADDRINUSE")),
                 stale_symlink,
+                missing_plugin,
             )
         };
         if running {
@@ -1332,6 +1440,13 @@ fn start_inner(app: &AppHandle, server: &Shared) -> Result<(), String> {
             if let Some(path) = &stale_symlink {
                 if heal_attempts < MAX_HEAL_ATTEMPTS && heal_stale_symlink(app, server, path) {
                     heal_attempts += 1;
+                    spawn(app, server, &node, &bin, port)?;
+                    continue;
+                }
+            }
+            if let Some(name) = &missing_plugin {
+                if plugin_heal_attempts < MAX_HEAL_ATTEMPTS && heal_missing_plugin(server, &node, &bin, name) {
+                    plugin_heal_attempts += 1;
                     spawn(app, server, &node, &bin, port)?;
                     continue;
                 }
@@ -1423,6 +1538,45 @@ mod tests {
             extract_stale_symlink_path("exists and is not a symlink; remove it so dsh can manage the installation fallback"),
             None
         );
+    }
+
+    // Real error line captured verbatim from a user's log (dsh-desktop
+    // issue #41): a marketplace plugin's compiled entry file was missing
+    // from disk, and the cordis loader's fatal-per-entry failure crashed the
+    // whole `dsh web` process. Real captured prefix uses the actual
+    // reporter's (Windows, Chinese-username) `~/.dsh` layout.
+    const REAL_MISSING_PLUGIN_LINE: &str = r"Cannot find module 'C:\Users\一一的最爱\.dsh\extension-manager\plugins\dsh-plugin-sodamem\dist\cjs\index.js' imported from C:\Users\一一的最爱\.dsh\profiles\web\";
+
+    fn real_plugins_dir() -> PathBuf {
+        PathBuf::from(r"C:\Users\一一的最爱\.dsh\extension-manager\plugins")
+    }
+
+    #[test]
+    fn extracts_plugin_name_from_a_real_captured_error() {
+        assert_eq!(
+            extract_missing_plugin_name(&real_plugins_dir(), REAL_MISSING_PLUGIN_LINE),
+            Some("dsh-plugin-sodamem".to_string())
+        );
+    }
+
+    #[test]
+    fn ignores_lines_unrelated_to_missing_plugins() {
+        let dir = real_plugins_dir();
+        assert_eq!(extract_missing_plugin_name(&dir, "dsh web: http://127.0.0.1:3080"), None);
+        assert_eq!(extract_missing_plugin_name(&dir, ""), None);
+        assert_eq!(
+            extract_missing_plugin_name(&dir, "some other error entirely unrelated to plugins"),
+            None
+        );
+    }
+
+    #[test]
+    fn ignores_extension_manager_prefix_without_a_plugin_name_after_it() {
+        // The prefix is present but truncated right at the plugins/
+        // boundary — no trailing path segment to read a name from.
+        let dir = real_plugins_dir();
+        let line = format!("something something {}", dir.display());
+        assert_eq!(extract_missing_plugin_name(&dir, &line), None);
     }
 
     #[test]
