@@ -528,6 +528,28 @@
       </div>
     </div>
     <!--
+      Shown on every window-close click (the X button) until the user picks
+      an answer and checks "remember" — see the "request-close-choice" event
+      handling in app.js and lib.rs's WindowEvent::CloseRequested. A separate
+      overlay from #confirm-dialog-overlay rather than a third openDialog()
+      shape: this is two equally-valid choices plus a remember checkbox, not
+      a confirm/cancel-of-one-action pair, so it doesn't fit that helper's
+      OK/Cancel model.
+    -->
+    <div id="close-choice-overlay" class="hidden">
+      <div id="close-choice-dialog" role="alertdialog" aria-modal="true" aria-describedby="close-choice-message">
+        <p id="close-choice-message" data-i18n="closeChoiceMessage"></p>
+        <label id="close-choice-remember-label">
+          <input id="close-choice-remember" type="checkbox" />
+          <span data-i18n="closeChoiceRemember"></span>
+        </label>
+        <div id="close-choice-actions" class="actions">
+          <button id="btn-close-choice-quit" data-i18n="closeChoiceQuit"></button>
+          <button id="btn-close-choice-minimize" class="primary" data-i18n="closeChoiceMinimize"></button>
+        </div>
+      </div>
+    </div>
+    <!--
       File tree right-click menu (see openTreeContextMenu in app.js) — built
       fresh into this one empty container on every right-click rather than a
       static template, since which items show up depends on what was
