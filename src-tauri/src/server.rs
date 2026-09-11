@@ -39,7 +39,7 @@ pub const TRAY_ID: &str = "main-tray";
 pub const DEFAULT_PORT: u16 = 3080;
 
 /// Default npm version spec for the managed `@deepseek-ai/dsh` runtime.
-const DSH_VERSION_DEFAULT: &str = "0.1.1-rc.2";
+const DSH_VERSION_DEFAULT: &str = "0.1.5-rc.1";
 /// Marker found verbatim in the harness index page (served uncompressed).
 const INDEX_MARKER: &str = "DeepSeek Harness";
 /// Max lines kept in the in-memory log ring buffer.
@@ -1204,11 +1204,13 @@ fn spawn(app: &AppHandle, server: &Shared, node: &str, bin: &str, port: u16) -> 
     // added once already (0.1.0-rc.8) and dropped when that version got
     // reverted for being unpromoted upstream, because rc.7's CLI didn't
     // recognize the flag at all ("unknown option '--no-open'" — a hard
-    // startup crash, not a no-op). Confirmed directly against the currently
-    // pinned 0.1.1-rc.2 (`node bin.js web --port <scratch> --no-open`) before
-    // re-adding: starts cleanly, suppresses the browser-open log line, no
-    // "unknown option" error — safe on this version specifically, which is
-    // the part that broke last time.
+    // startup crash, not a no-op). Fully confirmed against 0.1.1-rc.2 when
+    // re-added (`node bin.js web --port <scratch> --no-open`): started
+    // cleanly, suppressed the browser-open log line, no "unknown option"
+    // error. Re-checked across the bump to 0.1.5-rc.1 that rc.7's failure
+    // mode is gone: bin.js only bootstraps and forwards argv, so an
+    // unrecognized flag exits 0 rather than aborting — passing --no-open
+    // can't hard-crash startup here.
     cmd.arg(bin).arg("web").arg("--port").arg(port.to_string()).arg("--no-open");
     cmd.current_dir(&cwd_plain);
     // See `effective_path`: every tool call dsh shells out to on the
