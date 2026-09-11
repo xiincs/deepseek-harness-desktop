@@ -7,7 +7,8 @@
 //! - probe `127.0.0.1:3080` and attach to an already-running harness instead
 //!   of spawning a second instance (avoids concurrent writers on `~/.dsh`)
 //! - spawn `node <bin> web --port …` and discover the real URL from the
-//!   printed `dsh web: http://127.0.0.1:<port>` line
+//!   printed `dsh web: http://127.0.0.1:<port>/?token=<secret>` line
+//!   (see [`extract_ready_url`] — the token is required, not decoration)
 //! - navigate the main webview to the URL, watch the process, auto-restart
 //!   once per 60s window on unexpected exit, and surface errors to the boot page
 //! - clean up the whole process tree (`taskkill /T /F`) on stop
@@ -39,12 +40,23 @@ pub const TRAY_ID: &str = "main-tray";
 pub const DEFAULT_PORT: u16 = 3080;
 
 /// Default npm version spec for the managed `@deepseek-ai/dsh` runtime.
-const DSH_VERSION_DEFAULT: &str = "0.1.5-rc.1";
+///
+/// Deliberately pinned *below* npm's `latest` (0.1.5-rc.1). dsh 0.1.5 gates
+/// the whole UI behind a `SameSite=Strict` auth cookie and refuses
+/// cross-site requests outright, neither of which can work while this shell
+/// hosts the harness in a cross-site `<iframe>` (`tauri.localhost` →
+/// `127.0.0.1`). `check:dsh-version` carries the same exception, with the
+/// evidence. Adopting 0.1.5+ means serving the harness as a top-level
+/// document first — see docs/DEVELOPMENT.md.
+const DSH_VERSION_DEFAULT: &str = "0.1.1-rc.2";
 /// Marker found verbatim in the harness index page (served uncompressed).
 const INDEX_MARKER: &str = "DeepSeek Harness";
 /// Max lines kept in the in-memory log ring buffer.
 const LOG_CAP: usize = 400;
 /// The URL line printed by the web profile (`dsh-web-app`, `printUrl: true`).
+/// Only the prefix up to the port is fixed — as of dsh 0.1.5 the line
+/// continues with a per-boot `?token=` that must be kept. See
+/// [`extract_ready_url`].
 const URL_PREFIX: &str = "dsh web: http://127.0.0.1:";
 /// Minimum gap between automatic restarts of a crashing server.
 const AUTO_RESTART_MIN_GAP: Duration = Duration::from_secs(60);
@@ -811,6 +823,48 @@ pub fn install_pnpm(app: &AppHandle, server: &Shared) -> Result<(), String> {
     Ok(())
 }
 
+// ── ready-URL parsing ───────────────────────────────────────────────────────
+
+/// Extracts the ready URL from the startup line dsh's web profile prints
+/// (see [`URL_PREFIX`]), returning it *verbatim* — port **and everything
+/// after it up to the first whitespace**.
+///
+/// Keeping the tail is load-bearing as of dsh 0.1.5. The line is no longer
+/// just a URL:
+///
+/// ```text
+/// dsh web: http://127.0.0.1:3080/?token=<secret>     (0.1.5-rc.1)
+/// dsh web: http://127.0.0.1:3080                     (0.1.1-rc.2 and older)
+/// ```
+///
+/// 0.1.5 gates the whole UI behind that per-boot token: an unauthenticated
+/// `GET /` answers `401 dsh web authentication required; reopen the URL
+/// printed by dsh web`. Presenting the token once makes the app set its
+/// authority-scoped (`127.0.0.1:<port>`) auth cookie, after which the plain
+/// URL serves the app normally — but a URL rebuilt from the port alone never
+/// gets that far, which is exactly how the shell ended up loading a 401 page
+/// into the main window after the 0.1.5 bump. Rebuilding the URL here is the
+/// bug; pass the printed one through instead.
+///
+/// Returns `None` for any line not matching this narrow shape.
+fn extract_ready_url(line: &str) -> Option<String> {
+    let idx = line.find(URL_PREFIX)?;
+    let rest = &line[idx + URL_PREFIX.len()..];
+    let port: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if port.is_empty() {
+        return None;
+    }
+    // `port` is all-ASCII digits, so its length is a valid byte boundary in
+    // `rest`. Anchored on whitespace rather than "end of line" so trailing
+    // prose after the URL (and any ANSI reset a future TTY-attached stdout
+    // might add) can't leak into the value handed to the webview.
+    let suffix: String = rest[port.len()..]
+        .chars()
+        .take_while(|c| !c.is_whitespace())
+        .collect();
+    Some(format!("http://127.0.0.1:{port}{suffix}"))
+}
+
 // ── self-heal: stale profiles/node_modules symlinks ─────────────────────────
 
 /// Extracts the offending path from a dsh bootstrap error line matching
@@ -1259,20 +1313,15 @@ fn spawn(app: &AppHandle, server: &Shared, node: &str, bin: &str, port: u16) -> 
         let reader = BufReader::new(stdout);
         for line in reader.lines().map_while(Result::ok) {
             push_log(&srv2, line.clone());
-            if let Some(idx) = line.find(URL_PREFIX) {
-                let rest = &line[idx + URL_PREFIX.len()..];
-                let port: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-                if !port.is_empty() {
-                    // Only this reader's own child may report itself ready. A
-                    // stale line from a child already superseded by a newer
-                    // spawn (e.g. a fast restart) must not resurrect it as
-                    // the active server — see the exit watcher below for the
-                    // same guard against the mirror-image race.
-                    let is_current = srv2.lock().unwrap().pid == Some(pid);
-                    if is_current {
-                        let url = format!("http://127.0.0.1:{port}");
-                        set_running(&app2, &srv2, &url);
-                    }
+            if let Some(url) = extract_ready_url(&line) {
+                // Only this reader's own child may report itself ready. A
+                // stale line from a child already superseded by a newer
+                // spawn (e.g. a fast restart) must not resurrect it as
+                // the active server — see the exit watcher below for the
+                // same guard against the mirror-image race.
+                let is_current = srv2.lock().unwrap().pid == Some(pid);
+                if is_current {
+                    set_running(&app2, &srv2, &url);
                 }
             }
         }
@@ -1571,6 +1620,53 @@ mod tests {
     // `ensureSymlink` (two separate incidents, same shape, different package).
     const REAL_LINE_1: &str = r"Error: dsh: C:\Users\him69\.dsh\profiles\node_modules\@deepseek-ai\cordis-plugin-loader exists and is not a symlink; remove it so dsh can manage the installation fallback";
     const REAL_LINE_2: &str = r"Error: dsh: C:\Users\him69\.dsh\profiles\node_modules\@deepseek-ai\dsh-spill-policy exists and is not a symlink; remove it so dsh can manage the installation fallback";
+
+    // Real ready lines captured verbatim from `node bin.js web --port …`
+    // against each kernel, piped stdout (no TTY, so no ANSI wrapping).
+    // 0.1.1-rc.2 and older print a bare URL; 0.1.5-rc.1 appends a per-boot
+    // token, and an unauthenticated `GET /` against it answers 401.
+    const READY_LINE_0_1_1: &str = "dsh web: http://127.0.0.1:3203";
+    const READY_LINE_0_1_5: &str =
+        "dsh web: http://127.0.0.1:3199/?token=URU-pGyfy8ro_XYwM0k0FI5aunTDkb2sta3j27H66tc";
+
+    #[test]
+    fn keeps_the_token_from_a_real_0_1_5_ready_line() {
+        // The regression this guards: the URL was previously rebuilt from
+        // the parsed port alone, silently dropping `?token=`. The window
+        // then loaded a 401 instead of the harness.
+        assert_eq!(
+            extract_ready_url(READY_LINE_0_1_5),
+            Some(READY_LINE_0_1_5.trim_start_matches("dsh web: ").to_string())
+        );
+    }
+
+    #[test]
+    fn still_accepts_a_bare_url_from_older_kernels() {
+        // Bumping `DSH_VERSION_DEFAULT` down (or a user overriding
+        // `DSH_DESKTOP_DSH_VERSION` to a pre-0.1.5 kernel) must keep working.
+        assert_eq!(
+            extract_ready_url(READY_LINE_0_1_1),
+            Some("http://127.0.0.1:3203".to_string())
+        );
+    }
+
+    #[test]
+    fn stops_at_whitespace_after_the_url() {
+        assert_eq!(
+            extract_ready_url("dsh web: http://127.0.0.1:3080/?token=abc then some trailing prose"),
+            Some("http://127.0.0.1:3080/?token=abc".to_string())
+        );
+    }
+
+    #[test]
+    fn ignores_lines_that_are_not_a_ready_line() {
+        assert_eq!(extract_ready_url(""), None);
+        assert_eq!(extract_ready_url("http://127.0.0.1:3080"), None);
+        assert_eq!(
+            extract_ready_url("dsh web: http://127.0.0.1: starting up"),
+            None
+        );
+    }
 
     #[test]
     fn extracts_path_from_real_captured_errors() {

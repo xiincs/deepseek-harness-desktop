@@ -30,7 +30,7 @@ so it is fast and offline after the first run.
 | `DSH_DESKTOP_NODE` | Absolute path to `node.exe` to use instead of the one on `PATH` |
 | `DSH_DESKTOP_DSH_BIN` | Absolute path to a `dsh` `lib/bin.js` (e.g. a local checkout) |
 | `DSH_DESKTOP_RUNTIME_DIR` | Where the managed `@deepseek-ai/dsh` runtime is installed (default: app cache dir); point it at an existing `node_modules` root to skip the first-run npm install |
-| `DSH_DESKTOP_DSH_VERSION` | npm version spec for the managed runtime (default `0.1.5-rc.1`) |
+| `DSH_DESKTOP_DSH_VERSION` | npm version spec for the managed runtime (default `0.1.1-rc.2` — deliberately behind npm's `latest`; see "Why the pinned version may lag" below) |
 | `DSH_DESKTOP_PORT` | Default bind port override (default `3080`); handy for running several instances |
 | `DSH_DESKTOP_CWD` | Working directory for the `dsh` server process (default: user home) |
 | `DSH_HOME` | Passed through to the server; harness data root (default `~/.dsh`) |
@@ -133,4 +133,37 @@ showing up on `next`, no matter how many days it sits there looking stable, isn'
 act on. `check:dsh-version` gates on exactly that (`dist-tags`, not `versions.at(-1)`). To try an
 unpromoted version yourself, override it with `DSH_DESKTOP_DSH_VERSION` (see "Environment
 overrides" above) rather than changing the hardcoded default.
+
+### The other reason to lag: 0.1.5+ can't be hosted in an iframe at all
+
+The flip side of the rule above has an exception too, encoded in `NOT_ADOPTABLE` in
+`check-dsh-version.mjs`: **a version that *is* npm's `latest` still doesn't get adopted if it
+has been verified not to run in this shell**, and the script then treats being behind as the
+expected outcome rather than a failure. Today that table holds exactly one entry,
+`0.1.5-rc.1`.
+
+The cause isn't a bug — it's a deliberate upstream security design. dsh 0.1.5 puts the whole UI
+behind browser authentication: the cookie is `SameSite=Strict`, and before that is even
+consulted, any cross-site request is refused by `api-request-trust` (a cross-site
+`Sec-Fetch-Site` gets 403; an unauthenticated one gets 401). This repo happens to host the
+harness in a **cross-site** `<iframe>` — the outer page is `tauri.localhost`, the iframe points
+at `127.0.0.1:<port>` — so every request the harness makes is cross-site, and the window can only
+ever show `dsh web authentication required`.
+
+That conclusion was measured, not inferred: running both kernels side by side in the identical
+cross-site iframe, `0.1.1-rc.2` renders the harness boot screen and `0.1.5-rc.1` renders that 401
+line. (Relatedly, `server.rs` used to drop the `?token=` when parsing the startup URL, rebuilding
+it from the port alone — a second problem introduced by the same kernel bump. It now passes the
+printed URL through verbatim, but on its own that is not enough to make 0.1.5 work, for the
+cross-site reason above.)
+
+**Adopting 0.1.5+ therefore requires an architecture change first**: load the harness as a
+**top-level document** (Tauri multi-webview — the main webview navigates straight to the harness
+URL, the dock becomes a second webview in the same window that keeps loading from
+`tauri.localhost` so it retains IPC). Only then is the harness same-site with itself and the
+cookie usable; the harness still gets no Tauri IPC, since `dangerousRemoteDomainIpcAccess` stays
+off and remote origins are never injected with it. Do **not** try to make the iframe same-site by
+moving the shell page onto `127.0.0.1` as well — that needs remote-IPC access granted to that
+origin, which would hand it to the harness's port too and break the "harness pages get zero IPC"
+boundary outright. Until that refactor lands, `DSH_VERSION_DEFAULT` stays on `0.1.1-rc.2`.
 </content>
