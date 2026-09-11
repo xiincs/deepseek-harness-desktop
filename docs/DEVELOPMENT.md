@@ -30,7 +30,7 @@ npm run tauri dev    # 编译 Rust 外壳并打开应用窗口
 | `DSH_DESKTOP_NODE` | 指定 `node.exe` 的绝对路径，代替 `PATH` 上那个 |
 | `DSH_DESKTOP_DSH_BIN` | 指定某个 `dsh` `lib/bin.js` 的绝对路径（比如本地某个 checkout） |
 | `DSH_DESKTOP_RUNTIME_DIR` | 托管的 `@deepseek-ai/dsh` 运行时安装位置（默认是应用缓存目录）；指向一个已有的 `node_modules` 根目录可以跳过首次的 npm install |
-| `DSH_DESKTOP_DSH_VERSION` | 托管运行时使用的 npm 版本号（默认 `0.1.5-rc.1`） |
+| `DSH_DESKTOP_DSH_VERSION` | 托管运行时使用的 npm 版本号（默认 `0.1.1-rc.2`——故意落后于 npm 的 `latest`，原因见下面"为什么锁定的版本可能落后") |
 | `DSH_DESKTOP_PORT` | 默认绑定端口覆盖（默认 `3080`）；同时跑多个实例时很有用 |
 | `DSH_DESKTOP_CWD` | `dsh` 服务进程的工作目录（默认是用户主目录） |
 | `DSH_HOME` | 透传给服务端；harness 数据根目录（默认 `~/.dsh`） |
@@ -122,4 +122,28 @@ RC 发到 `next`（或者不挂任何 tag），观察一段时间再决定要不
 好几天看起来很稳定，都不是该跟进的信号。`check:dsh-version` 脚本就是照这个信号做门控的（查
 `dist-tags`，不是 `versions.at(-1)`）。想手动尝鲜一个还没转正的版本，用
 `DSH_DESKTOP_DSH_VERSION` 覆盖（见上面"环境变量覆盖项"），不要改动写死的默认值。
+
+### `latest` 已经是 `latest`，但这个仓库仍然不跟进：0.1.5 起不能再用 iframe 承载
+
+上面那条规则的反面也有一个例外，写在 `check-dsh-version.mjs` 的 `NOT_ADOPTABLE` 表里：**即使某个
+版本已经是 npm 的 `latest`，只要验证过这个外壳跑不起来，就不跟进**，脚本会把落后当成预期结果放行
+（而不是当成错误）。目前表里只有一项，就是 `0.1.5-rc.1`。
+
+原因不是 bug，是上游刻意的安全设计：dsh 0.1.5 把整个界面挡在浏览器认证后面——cookie 是
+`SameSite=Strict`，而且在那之前，任何跨站请求都会被 `api-request-trust` 直接拒掉（带跨站
+`Sec-Fetch-Site` 的返回 403，认证不过的返回 401）。而本仓库恰恰是把 harness 放在一个**跨站**
+`<iframe>` 里（外层页面是 `tauri.localhost`，iframe 指向 `127.0.0.1:<port>`），harness 发出的每一个
+请求都是跨站的，于是窗口里永远只会显示 `dsh web authentication required`。
+
+这个结论是实测出来的，不是推断：同一个跨站 iframe 里并排跑两个内核，`0.1.1-rc.2` 正常渲染出 harness
+启动页，`0.1.5-rc.1` 渲染出上面那句 401 提示。顺带一提，`server.rs` 里解析启动 URL 时曾经把
+`?token=` 丢掉（只取端口重建 URL），那是同一轮内核升级引入的第二个问题——现在会原样保留整条 URL，
+但因为上面这条跨站限制，单靠它并不足以让 0.1.5 跑起来。
+
+**要跟进 0.1.5+，前提是先改架构**：把 harness 作为**顶层文档**加载（Tauri 的多 webview：主 webview
+直接导航到 harness URL，dock 拆成同窗口的另一个 webview，仍然跑 `tauri.localhost` 以便使用 IPC）。
+这样 harness 与自身同站，cookie 才生效；同时 harness 依旧拿不到 Tauri IPC（`dangerousRemoteDomainIpcAccess`
+保持关闭，远程来源不注入 IPC）。注意**不要**为了让 iframe 同站而把外壳页面也搬到 `127.0.0.1` 上——
+那需要给这个来源开远程 IPC 权限，会连带把 harness 的端口也放进来，直接破坏"harness 页面零 IPC"这条边界。
+在架构改完之前，`DSH_VERSION_DEFAULT` 就停在 `0.1.1-rc.2`。
 </content>

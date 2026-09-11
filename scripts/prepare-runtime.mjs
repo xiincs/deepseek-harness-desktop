@@ -4,7 +4,9 @@
 // milestone.
 //
 // Usage: node scripts/prepare-runtime.mjs
-// Env:   DSH_DESKTOP_DSH_VERSION  npm version spec (default 0.1.5-rc.1)
+// Env:   DSH_DESKTOP_DSH_VERSION  npm version spec (default 0.1.1-rc.2 — see
+//                                 check-dsh-version.mjs for why this is
+//                                 deliberately behind npm's `latest`)
 //        DSH_RUNTIME_SOURCE       directory containing node_modules/@deepseek-ai/dsh
 //                                 (e.g. an existing npx cache root) — copies it
 //                                 locally instead of hitting the npm registry.
@@ -16,7 +18,7 @@ import { fileURLToPath } from "node:url";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const runtimeDir = join(root, "src-tauri", "resources", "runtime");
-const version = process.env.DSH_DESKTOP_DSH_VERSION ?? "0.1.5-rc.1";
+const version = process.env.DSH_DESKTOP_DSH_VERSION ?? "0.1.1-rc.2";
 mkdirSync(runtimeDir, { recursive: true });
 
 const source = process.env.DSH_RUNTIME_SOURCE;
