@@ -60,22 +60,25 @@ if (serverRsVersion !== prepareRuntimeVersion) {
 // Fail-closed by construction: a *newer* version upstream can't inherit an
 // entry, so promoting past one of these fails this check again and forces a
 // fresh look rather than silently extending the exception.
-const NOT_ADOPTABLE = new Map([
-  [
-    "0.1.5-rc.1",
-    "dsh 0.1.5 gates the entire UI behind a SameSite=Strict browser-auth cookie, " +
-      "and refuses cross-site requests before that (api-request-trust: a cross-site " +
-      "Sec-Fetch-Site is answered 403; an unauthenticated one 401). This shell hosts " +
-      "the harness in a cross-site <iframe> (outer page tauri.localhost -> harness " +
-      "127.0.0.1:<port>), so every request the harness makes is cross-site and the " +
-      "window cannot authenticate. Reproduced in a real Chromium with both kernels " +
-      "side by side in the identical cross-site iframe: 0.1.1-rc.2 renders the " +
-      "harness boot screen, 0.1.5-rc.1 renders 'dsh web authentication required'. " +
-      "Not a bug to work around — upstream's browser-token-authentication design " +
-      "deliberately excludes this embedding. Adopting 0.1.5+ requires serving the " +
-      "harness as a top-level document instead of an iframe; see docs/DEVELOPMENT.md.",
-  ],
-]);
+//
+// Currently empty. The one entry it held — `0.1.5-rc.1` — is gone because the
+// blocker was fixed rather than tolerated. 0.1.5 gates the whole UI behind
+// browser auth that requires same-site: the ready line carries a required
+// `?token=`, `GET /` without a cookie answers 401, the `dsh-auth-*` cookie is
+// `SameSite=Strict` (so it only sticks when the harness is itself the top-level
+// document), and `/api/*` is 401 without the cookie / 403 for
+// `Sec-Fetch-Site: cross-site`. That was fatal while the harness was a
+// cross-site `<iframe>` under `tauri.localhost`. It now renders as a top-level
+// document in its own webview (see `HARNESS_WEBVIEW_LABEL` in
+// src-tauri/src/lib.rs), so the cookie works and 0.1.5 is adoptable — hence the
+// pin above.
+//
+// Re-verifying any of this? Note npm **republishes** these 0.x prereleases:
+// same version string, different contents. A stale local copy whose build had
+// the auth unwired (bare ready URL, `/` served unauthenticated) once produced a
+// confidently wrong "0.1.5 has no auth" conclusion. Measure against what npm
+// currently publishes.
+const NOT_ADOPTABLE = new Map([]);
 
 console.log("\nChecking npm dist-tags...");
 let distTags;

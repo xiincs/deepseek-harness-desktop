@@ -1682,36 +1682,27 @@ body.resizing-rows #panel-preview-body {
   background: var(--bg);
 }
 
-/* zoom, not transform: scale (used here previously — see issue #26):
-   transform is paint-only, so the iframe got rasterized at its full size
-   and then the compositor bitmap-resampled that layer down 10%, which is
-   what made the harness content visibly blurry. zoom is the same
-   layout-level mechanism real browser page-zoom (Ctrl+-) uses — the
-   harness page's own layout reflows at 90% and is rasterized directly at
-   that final size (smaller text/controls, ~11% more content visible),
-   staying crisp, while the box on our side stays a plain 100%: zoom
-   changes the content density inside the box, not the box's own on-screen
-   size, so — unlike transform — it needs no oversizing to compensate (that
-   instead just overflowed #content on the right/bottom).
-   width/height must still be explicit percentages, not just `inset: 0`:
-   iframe is a replaced element, and replaced elements don't stretch to
-   fill an auto-sized box the way a div does even with all four insets
-   pinned to 0 — omitting them collapsed #harness-frame to its intrinsic
-   default (~300×150) shrunk further by zoom, a small box pinned top-left.
-   Independent of the disable_zoom_control WebView2 setting in lib.rs
-   (unbounded, user-triggered, no way back to 100%) — this is a fixed
-   value we set once, not user-adjustable, so it can't end up stuck. */
-#harness-frame {
+/* The harness is no longer an <iframe> here — it renders in a separate native
+   child webview (lib.rs's HARNESS_WEBVIEW_LABEL) that the shell positions over
+   #content via harness_set_bounds. So there's no #harness-frame element or its
+   inset/zoom rules left to style; #content above is simply the slot whose
+   on-screen geometry the shell reports to Rust. (The old zoom:0.9 density tweak
+   from issue #26 went away with the iframe; if the harness wants sub-100%
+   density again, apply Webview::set_zoom in lib.rs rather than CSS here.) */
+
+/* Dim backdrop over the harness slot, shown only while the harness webview is
+   hidden for an open overlay (app.js syncHarnessVisibility). z-index sits below
+   the app-menu (20) and the modal overlays (30/40) so those paint on top of it
+   — it exists purely so the vacated content area reads as a dimmed background
+   rather than a blank white flash. */
+#harness-scrim {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  border: none;
-  zoom: 0.9;
+  inset: 0;
+  z-index: 4;
+  background: rgba(0, 0, 0, 0.45);
 }
 
-#harness-frame.hidden {
+#harness-scrim.hidden {
   display: none;
 }
 

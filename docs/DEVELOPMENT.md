@@ -30,7 +30,7 @@ npm run tauri dev    # 编译 Rust 外壳并打开应用窗口
 | `DSH_DESKTOP_NODE` | 指定 `node.exe` 的绝对路径，代替 `PATH` 上那个 |
 | `DSH_DESKTOP_DSH_BIN` | 指定某个 `dsh` `lib/bin.js` 的绝对路径（比如本地某个 checkout） |
 | `DSH_DESKTOP_RUNTIME_DIR` | 托管的 `@deepseek-ai/dsh` 运行时安装位置（默认是应用缓存目录）；指向一个已有的 `node_modules` 根目录可以跳过首次的 npm install |
-| `DSH_DESKTOP_DSH_VERSION` | 托管运行时使用的 npm 版本号（默认 `0.1.1-rc.2`——故意落后于 npm 的 `latest`，原因见下面"为什么锁定的版本可能落后") |
+| `DSH_DESKTOP_DSH_VERSION` | 托管运行时使用的 npm 版本号（默认 `0.1.5-rc.1`，与 npm 的 `latest` 保持一致；想尝鲜未转正的版本时用它覆盖） |
 | `DSH_DESKTOP_PORT` | 默认绑定端口覆盖（默认 `3080`）；同时跑多个实例时很有用 |
 | `DSH_DESKTOP_CWD` | `dsh` 服务进程的工作目录（默认是用户主目录） |
 | `DSH_HOME` | 透传给服务端；harness 数据根目录（默认 `~/.dsh`） |
@@ -123,27 +123,40 @@ RC 发到 `next`（或者不挂任何 tag），观察一段时间再决定要不
 `dist-tags`，不是 `versions.at(-1)`）。想手动尝鲜一个还没转正的版本，用
 `DSH_DESKTOP_DSH_VERSION` 覆盖（见上面"环境变量覆盖项"），不要改动写死的默认值。
 
-### `latest` 已经是 `latest`，但这个仓库仍然不跟进：0.1.5 起不能再用 iframe 承载
+### 0.1.5 起 harness 必须当顶层文档承载（为什么本仓库为此改过架构）
 
-上面那条规则的反面也有一个例外，写在 `check-dsh-version.mjs` 的 `NOT_ADOPTABLE` 表里：**即使某个
-版本已经是 npm 的 `latest`，只要验证过这个外壳跑不起来，就不跟进**，脚本会把落后当成预期结果放行
-（而不是当成错误）。目前表里只有一项，就是 `0.1.5-rc.1`。
+反面的例外也留着一个位置，写在 `check-dsh-version.mjs` 的 `NOT_ADOPTABLE` 表里：**即使某个版本已经
+是 npm 的 `latest`，只要验证过这个外壳跑不起来，就不跟进**，脚本把落后当成预期结果放行。它曾经用来
+豁免 `0.1.5-rc.1`，**现在表是空的**——因为障碍是被修掉的，不是被容忍的（下详）。
 
-原因不是 bug，是上游刻意的安全设计：dsh 0.1.5 把整个界面挡在浏览器认证后面——cookie 是
-`SameSite=Strict`，而且在那之前，任何跨站请求都会被 `api-request-trust` 直接拒掉（带跨站
-`Sec-Fetch-Site` 的返回 403，认证不过的返回 401）。而本仓库恰恰是把 harness 放在一个**跨站**
-`<iframe>` 里（外层页面是 `tauri.localhost`，iframe 指向 `127.0.0.1:<port>`），harness 发出的每一个
-请求都是跨站的，于是窗口里永远只会显示 `dsh web authentication required`。
+原因不是 bug，是上游刻意的浏览器认证，而且它**要求同站**。对 npm 当前发布的 `0.1.5-rc.1` 实测：
 
-这个结论是实测出来的，不是推断：同一个跨站 iframe 里并排跑两个内核，`0.1.1-rc.2` 正常渲染出 harness
-启动页，`0.1.5-rc.1` 渲染出上面那句 401 提示。顺带一提，`server.rs` 里解析启动 URL 时曾经把
-`?token=` 丢掉（只取端口重建 URL），那是同一轮内核升级引入的第二个问题——现在会原样保留整条 URL，
-但因为上面这条跨站限制，单靠它并不足以让 0.1.5 跑起来。
+- 启动行变成 `dsh web: http://127.0.0.1:<port>/?token=<secret>`，**token 是必填的**；
+- 不带 cookie 的 `GET /` 一律返回 **401** `dsh web authentication required; reopen the URL printed
+  by dsh web.`；
+- `GET /?token=<secret>` 返回 **303** 跳回 `/`，并种下 `dsh-auth-<authority>` cookie
+  （`HttpOnly; SameSite=Strict; Path=/`，绑定 `host:port`）；
+- `/api/*` 不带 cookie 是 **401**，带 `Sec-Fetch-Site: cross-site` 是 **403**（`api-request-trust`）。
 
-**要跟进 0.1.5+，前提是先改架构**：把 harness 作为**顶层文档**加载（Tauri 的多 webview：主 webview
-直接导航到 harness URL，dock 拆成同窗口的另一个 webview，仍然跑 `tauri.localhost` 以便使用 IPC）。
-这样 harness 与自身同站，cookie 才生效；同时 harness 依旧拿不到 Tauri IPC（`dangerousRemoteDomainIpcAccess`
-保持关闭，远程来源不注入 IPC）。注意**不要**为了让 iframe 同站而把外壳页面也搬到 `127.0.0.1` 上——
-那需要给这个来源开远程 IPC 权限，会连带把 harness 的端口也放进来，直接破坏"harness 页面零 IPC"这条边界。
-在架构改完之前，`DSH_VERSION_DEFAULT` 就停在 `0.1.1-rc.2`。
+`SameSite=Strict` 的 cookie 只有在 harness **自己就是顶层文档**时才存得下、带得上。本仓库原本
+把 harness 放在**跨站** `<iframe>` 里（外层 `tauri.localhost`，iframe 指向 `127.0.0.1:<port>`），
+cookie 永远不生效，于是窗口里只剩那行 401 文案。顺带一提，`server.rs` 解析启动 URL 时曾经把
+端口之后的内容丢掉（只取端口重建 URL）——那样连 token 都没了，**必须**原样保留整条 URL。
+
+⚠️ **一个会坑人的上游行为**：npm 上这些 0.x 预发布包会被**重新发布**（同一个版本号、不同内容），
+`prepare-runtime.mjs` 的注释里也写了这一点。曾经因为读的是 `~/.dsh` 里 9 月 10 日的旧副本
+（那一版的认证没有接线，`/` 免认证、ready 行无 token），误判成"0.1.5 根本没有认证"。
+**判断认证行为时一定要以当前 npm 发布的那份为准**，别拿本地旧副本下结论。
+
+**所以 0.1.5+ 的前提是改架构，而这项改造已经落地**：harness 现在作为**顶层文档**渲染在同一个窗口的
+子 webview 里（Tauri `unstable` 功能的 `Window::add_child`，见 `lib.rs` 的 `HARNESS_WEBVIEW_LABEL`），
+外壳（工具栏/dock/覆盖层）继续跑在 `tauri.localhost` 的 webview 里以保留 IPC。这样 harness 是顶层
+文档，`SameSite=Strict` 的 cookie 才存得下、带得上，认证与 `/api` 才走得通；同时 harness 依旧拿不到
+Tauri IPC（`dangerousRemoteDomainIpcAccess` 保持关闭，远程来源不注入 IPC）。注意**不要**为了让 iframe
+同源而把外壳页面也搬到 `127.0.0.1` 上——那需要给这个来源开远程 IPC 权限，会连带把 harness 的端口也
+放进来，直接破坏"harness 页面零 IPC"这条边界。`DSH_VERSION_DEFAULT` 现已跟到 `0.1.5-rc.1`。
+
+**两个随架构而来的副作用**（写在 CLAUDE.md 里，改动时别丢）：harness 子 webview 是盖在 shell 页面
+之上的兄弟原生 webview，会挡住 DOM 覆盖层（靠 `app.js` 的 `syncHarnessVisibility()` 遮挡时隐藏）；
+外壳那些 WebView2 控制级设置也不再自动覆盖 harness，建子 webview 时要单独设一遍。
 </content>

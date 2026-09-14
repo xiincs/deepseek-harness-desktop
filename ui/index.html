@@ -265,7 +265,26 @@
             <pre id="log-box" class="log hidden"></pre>
           </section>
 
-          <iframe id="harness-frame" class="hidden" title="DeepSeek Harness"></iframe>
+          <!--
+            The harness is no longer an <iframe> here. dsh 0.1.5 gates the whole
+            UI behind browser auth whose cookie is SameSite=Strict, so the
+            harness must be a top-level document for that cookie to be stored
+            and sent — cross-site iframe content never gets it, and the window
+            would show only the 401 line. (Its /api fence is the same story:
+            401 without the cookie, 403 for Sec-Fetch-Site: cross-site.)
+            It now renders in a separate native child webview (lib.rs's
+            HARNESS_WEBVIEW_LABEL) that the shell positions over this #content
+            box and shows/hides via the harness_* commands (see app.js's
+            reportHarnessBounds / syncHarnessVisibility). #content stays as the
+            slot whose geometry those bounds track.
+          -->
+          <!--
+            Dim backdrop shown (by app.js's syncHarnessVisibility) only while
+            the harness webview is hidden for an open overlay — the harness is
+            a native webview stacked above this page, so menus/dialogs make it
+            step aside; without this the vacated area would flash blank white.
+          -->
+          <div id="harness-scrim" class="hidden"></div>
         </div>
 
         <div id="resize-panel-content" class="resize-handle hidden" role="separator" aria-orientation="vertical"></div>
