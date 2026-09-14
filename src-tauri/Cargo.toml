@@ -17,7 +17,14 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+# `unstable`: enables multi-webview-per-window (Window::add_child) — the
+# harness now renders in a second, top-level child webview rather than an
+# <iframe>, so its SameSite=Strict auth cookie (dsh 0.1.5 gates the whole UI
+# behind browser auth) is actually stored and sent — cross-site iframe content
+# never gets it, which left the window showing only the 401 line). Gated behind
+# `unstable` upstream; pinned via Cargo.lock and only bumped deliberately.
+# See lib.rs.
+tauri = { version = "2", features = ["tray-icon", "unstable"] }
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"

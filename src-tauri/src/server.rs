@@ -7,8 +7,9 @@
 //! - probe `127.0.0.1:3080` and attach to an already-running harness instead
 //!   of spawning a second instance (avoids concurrent writers on `~/.dsh`)
 //! - spawn `node <bin> web --port …` and discover the real URL from the
-//!   printed `dsh web: http://127.0.0.1:<port>/?token=<secret>` line
-//!   (see [`extract_ready_url`] — the token is required, not decoration)
+//!   printed `dsh web: http://127.0.0.1:<port>/?token=<secret>` line, keeping
+//!   the token (see [`extract_ready_url`] — as of 0.1.5 it is required, not
+//!   decoration; the line may also carry a trailing ` (LAN: …)` note)
 //! - navigate the main webview to the URL, watch the process, auto-restart
 //!   once per 60s window on unexpected exit, and surface errors to the boot page
 //! - clean up the whole process tree (`taskkill /T /F`) on stop
@@ -41,22 +42,36 @@ pub const DEFAULT_PORT: u16 = 3080;
 
 /// Default npm version spec for the managed `@deepseek-ai/dsh` runtime.
 ///
-/// Deliberately pinned *below* npm's `latest` (0.1.5-rc.1). dsh 0.1.5 gates
-/// the whole UI behind a `SameSite=Strict` auth cookie and refuses
-/// cross-site requests outright, neither of which can work while this shell
-/// hosts the harness in a cross-site `<iframe>` (`tauri.localhost` →
-/// `127.0.0.1`). `check:dsh-version` carries the same exception, with the
-/// evidence. Adopting 0.1.5+ means serving the harness as a top-level
-/// document first — see docs/DEVELOPMENT.md.
-const DSH_VERSION_DEFAULT: &str = "0.1.1-rc.2";
+/// Tracks npm's `latest`. 0.1.5 gates the whole UI behind browser auth that
+/// requires same-site, so it could not be adopted while the harness was a
+/// cross-site `<iframe>` under `tauri.localhost`: the ready URL carries a
+/// required `?token=`, `GET /` without a cookie answers 401, and the
+/// `dsh-auth-*` cookie is `SameSite=Strict` — it can only be stored and sent
+/// when the harness is itself the top-level document. (Its `/api/*` fence is
+/// the same story: 401 without the cookie, 403 for `Sec-Fetch-Site: cross-site`.)
+/// The shell now renders the harness as a top-level document in its own
+/// webview, so the cookie works — see `HARNESS_WEBVIEW_LABEL` in lib.rs.
+///
+/// Beware when re-verifying any of this: npm **republishes** these 0.x
+/// prereleases (same version string, different contents), and an older copy in
+/// `~/.dsh` whose build had the auth unwired once produced a completely wrong
+/// "0.1.5 has no auth" conclusion. Check what npm currently publishes.
+const DSH_VERSION_DEFAULT: &str = "0.1.5-rc.1";
 /// Marker found verbatim in the harness index page (served uncompressed).
 const INDEX_MARKER: &str = "DeepSeek Harness";
+/// Stable fragment of the body dsh answers an unauthenticated `GET /` with as
+/// of 0.1.5 (the full sentence is `dsh web authentication required; reopen the
+/// URL printed by dsh web.`). A short fragment rather than the whole line, for
+/// the same reason as [`STALE_SYMLINK_BOUNDARY`]: upstream prose drifts, and
+/// matching it exactly is how a detector silently dies.
+const AUTH_REQUIRED_MARKER: &str = "dsh web authentication required";
 /// Max lines kept in the in-memory log ring buffer.
 const LOG_CAP: usize = 400;
 /// The URL line printed by the web profile (`dsh-web-app`, `printUrl: true`).
 /// Only the prefix up to the port is fixed — as of dsh 0.1.5 the line
-/// continues with a per-boot `?token=` that must be kept. See
-/// [`extract_ready_url`].
+/// continues with a per-boot `?token=` that must be kept, and it may also carry
+/// a trailing ` (LAN: http://<ip>:<port>)` note. [`extract_ready_url`] therefore
+/// preserves everything up to the first whitespace.
 const URL_PREFIX: &str = "dsh web: http://127.0.0.1:";
 /// Minimum gap between automatic restarts of a crashing server.
 const AUTO_RESTART_MIN_GAP: Duration = Duration::from_secs(60);
@@ -65,12 +80,23 @@ const AUTO_RESTART_MIN_GAP: Duration = Duration::from_secs(60);
 /// starts can be slow, but an upstream format change (see `URL_PREFIX`)
 /// would otherwise hang here forever with no feedback on the boot page.
 const READY_TIMEOUT: Duration = Duration::from_secs(45);
-/// Substring of the error `@deepseek-ai/dsh-app-boot`'s `ensureSymlink`
-/// throws when `~/.dsh/profiles/node_modules/@deepseek-ai/<pkg>` is a real
-/// directory instead of the managed symlink dsh expects there — observed in
-/// practice from a `~/.dsh` a concurrent dsh process had corrupted. See
-/// `extract_stale_symlink_path`.
-const STALE_SYMLINK_MARKER: &str = " exists and is not a symlink; remove it so dsh can manage the installation fallback";
+/// The text `@deepseek-ai/dsh-app-boot`'s bootstrap prints immediately *after*
+/// the offending path when `~/.dsh/profiles/node_modules/@deepseek-ai/<pkg>`
+/// is a real directory instead of the managed symlink/proxy dsh expects there
+/// — observed in practice from a `~/.dsh` a concurrent dsh process had
+/// corrupted. dsh 0.1.5 widened the wording into three shapes that all share
+/// this path-terminating prefix and the [`STALE_SYMLINK_SUFFIX`] tail:
+///   `<path> exists and is not a symlink; remove it …`                   (≤ 0.1.1)
+///   `<path> exists and is not a symlink or dsh-managed module proxy; …` (0.1.5, dsh-app-boot lib/index.js:416)
+///   `<path> exists and is not a dsh-managed module proxy; …`            (0.1.5, :569)
+/// Matching this boundary rather than the exact prose keeps the self-heal
+/// working across all three; keying on the old full string silently went dead
+/// on 0.1.5. See `extract_stale_symlink_path`.
+const STALE_SYMLINK_BOUNDARY: &str = " exists and is not a";
+/// Stable tail shared by every variant of the stale-install error above,
+/// required as a guard so an unrelated " exists and is not a …" line can't be
+/// mistaken for one.
+const STALE_SYMLINK_SUFFIX: &str = "; remove it so dsh can manage the installation fallback";
 /// Cap on automatic heal-and-retry cycles per `start_inner` call. dsh reports
 /// these one at a time (fixing one reveals the next), so a real `~/.dsh` with
 /// several needs more than one retry — but this must stay bounded in case a
@@ -829,22 +855,20 @@ pub fn install_pnpm(app: &AppHandle, server: &Shared) -> Result<(), String> {
 /// (see [`URL_PREFIX`]), returning it *verbatim* — port **and everything
 /// after it up to the first whitespace**.
 ///
-/// Keeping the tail is load-bearing as of dsh 0.1.5. The line is no longer
-/// just a URL:
+/// Keeping the tail is **load-bearing** as of dsh 0.1.5: the line is no longer
+/// just a URL, and dropping the query means navigating the harness webview to a
+/// URL the server answers with `401 dsh web authentication required`. Real
+/// shapes seen:
 ///
 /// ```text
-/// dsh web: http://127.0.0.1:3080/?token=<secret>     (0.1.5-rc.1)
-/// dsh web: http://127.0.0.1:3080                     (0.1.1-rc.2 and older)
+/// dsh web: http://127.0.0.1:3080/?token=<secret>              (0.1.5-rc.1)
+/// dsh web: http://127.0.0.1:3080                              (0.1.1-rc.2 and older)
+/// dsh web: http://127.0.0.1:3080 (LAN: http://10.0.0.2:3080)  (bound to 0.0.0.0)
 /// ```
 ///
-/// 0.1.5 gates the whole UI behind that per-boot token: an unauthenticated
-/// `GET /` answers `401 dsh web authentication required; reopen the URL
-/// printed by dsh web`. Presenting the token once makes the app set its
-/// authority-scoped (`127.0.0.1:<port>`) auth cookie, after which the plain
-/// URL serves the app normally — but a URL rebuilt from the port alone never
-/// gets that far, which is exactly how the shell ended up loading a 401 page
-/// into the main window after the 0.1.5 bump. Rebuilding the URL here is the
-/// bug; pass the printed one through instead.
+/// Taking port-and-everything-after-until-whitespace keeps the `?token=` while
+/// excluding that trailing ` (LAN: …)` note. Rebuilding the URL from the port
+/// alone is the bug this guards; pass the printed URL through instead.
 ///
 /// Returns `None` for any line not matching this narrow shape.
 fn extract_ready_url(line: &str) -> Option<String> {
@@ -867,19 +891,26 @@ fn extract_ready_url(line: &str) -> Option<String> {
 
 // ── self-heal: stale profiles/node_modules symlinks ─────────────────────────
 
-/// Extracts the offending path from a dsh bootstrap error line matching
-/// [`STALE_SYMLINK_MARKER`], e.g.:
+/// Extracts the offending path from a dsh bootstrap error line, bounded by
+/// [`STALE_SYMLINK_BOUNDARY`] and carrying the [`STALE_SYMLINK_SUFFIX`] tail,
+/// e.g.:
 /// `dsh: C:\Users\x\.dsh\profiles\node_modules\@deepseek-ai\foo exists and
 /// is not a symlink; remove it so dsh can manage the installation fallback`
-/// Returns `None` for any line that doesn't match this exact, narrow shape.
+/// (or either of the 0.1.5 wordings — see [`STALE_SYMLINK_BOUNDARY`]).
+/// Returns `None` for any line that doesn't match this narrow shape.
 fn extract_stale_symlink_path(line: &str) -> Option<PathBuf> {
-    let marker_idx = line.find(STALE_SYMLINK_MARKER)?;
-    let prefix = "dsh: ";
-    let prefix_idx = line.find(prefix)?;
-    if prefix_idx >= marker_idx {
+    // Require the stable tail so a stray " exists and is not a …" line (some
+    // unrelated error, or foreign log noise) can't be parsed as this one.
+    if !line.contains(STALE_SYMLINK_SUFFIX) {
         return None;
     }
-    let path_str = line[prefix_idx + prefix.len()..marker_idx].trim();
+    let boundary_idx = line.find(STALE_SYMLINK_BOUNDARY)?;
+    let prefix = "dsh: ";
+    let prefix_idx = line.find(prefix)?;
+    if prefix_idx >= boundary_idx {
+        return None;
+    }
+    let path_str = line[prefix_idx + prefix.len()..boundary_idx].trim();
     if path_str.is_empty() {
         return None;
     }
@@ -1127,32 +1158,52 @@ fn effective_path() -> String {
 
 // ── probing & spawning ───────────────────────────────────────────────────────
 
-/// Cheap dependency-free HTTP probe: does `http://host:port/` serve the
-/// harness index page? A closed port fails as fast as the OS reports the
-/// refusal; the timeouts only matter when something is listening but slow
-/// to answer — the exact case where a single impatient probe misfires (see
-/// `probe_dsh_with_retries`).
-fn probe_dsh(url: &str) -> bool {
+/// What is answering on a port we want to use, as far as a cheap HTTP probe
+/// can tell.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum PortState {
+    /// Nothing answered — the connect was refused.
+    Free,
+    /// A dsh is serving its index page unauthenticated, so the harness webview
+    /// can be pointed straight at the bare URL. This is the "attach to an
+    /// already-running harness" case, and as of 0.1.5 it only happens for
+    /// kernels old enough to predate the browser auth (or a build of 0.1.5
+    /// with it unwired).
+    DshAttachable,
+    /// A dsh is listening but gates its UI behind browser auth (0.1.5+), so we
+    /// **cannot** attach. The `?token=` that unlocks it is per-process and was
+    /// printed to *that* process's stdout, which we don't have; the bare URL
+    /// just answers 401. Verified against the npm-current 0.1.5-rc.1.
+    DshAuthGated,
+    /// Something is listening that isn't a dsh we recognize.
+    Foreign,
+}
+
+/// One classification attempt. `None` means the connection was made but no
+/// parseable HTTP answer came back (a server mid-startup) — worth retrying,
+/// unlike the definitive classifications above.
+fn probe_port_once(url: &str) -> Option<PortState> {
     let rest = url.strip_prefix("http://").unwrap_or(url);
     let (host, port) = match rest.rsplit_once(':') {
         Some((h, p)) => (h, p.parse::<u16>().unwrap_or(80)),
         None => (rest, 80),
     };
     let Ok(mut addrs) = (host, port).to_socket_addrs() else {
-        return false;
+        return Some(PortState::Free);
     };
     let Some(sockaddr) = addrs.next() else {
-        return false;
+        return Some(PortState::Free);
     };
     let Ok(mut stream) = TcpStream::connect_timeout(&sockaddr, Duration::from_millis(1500)) else {
-        return false;
+        // Refused: nothing is listening. Definitive, no point retrying.
+        return Some(PortState::Free);
     };
     let _ = stream.set_read_timeout(Some(Duration::from_millis(2500)));
     let req = format!(
         "GET / HTTP/1.1\r\nHost: {host}:{port}\r\nAccept-Encoding: identity\r\nConnection: close\r\nUser-Agent: dsh-desktop\r\n\r\n"
     );
     if stream.write_all(req.as_bytes()).is_err() {
-        return false;
+        return None;
     }
     let mut buf = Vec::new();
     let mut tmp = [0u8; 4096];
@@ -1167,7 +1218,16 @@ fn probe_dsh(url: &str) -> bool {
             }
         }
     }
-    String::from_utf8_lossy(&buf).contains(INDEX_MARKER)
+    let body = String::from_utf8_lossy(&buf);
+    if body.contains(INDEX_MARKER) {
+        Some(PortState::DshAttachable)
+    } else if body.contains(AUTH_REQUIRED_MARKER) {
+        Some(PortState::DshAuthGated)
+    } else if body.starts_with("HTTP/") {
+        Some(PortState::Foreign)
+    } else {
+        None
+    }
 }
 
 /// Several probe attempts with a small gap between them. The harness serves
@@ -1176,17 +1236,30 @@ fn probe_dsh(url: &str) -> bool {
 /// negative here would make `start_inner` spawn a SECOND server on the same
 /// `~/.dsh`. A refused connection returns immediately, so the retry loop
 /// adds no meaningful latency when nothing is listening — it only waits in
-/// the ambiguous "listening but slow" case.
-fn probe_dsh_with_retries(url: &str, attempts: u32, gap_ms: u64) -> bool {
+/// the ambiguous "listening but slow" case, which is exactly the `None`
+/// classification `probe_port_once` reports.
+fn probe_port(url: &str, attempts: u32, gap_ms: u64) -> PortState {
     for attempt in 0..attempts {
-        if probe_dsh(url) {
-            return true;
+        if let Some(state) = probe_port_once(url) {
+            return state;
         }
         if attempt + 1 < attempts {
             thread::sleep(Duration::from_millis(gap_ms));
         }
     }
-    false
+    // Never got a usable answer: treat as nothing we can use.
+    PortState::Free
+}
+
+/// Does `http://host:port/` serve the harness index page unauthenticated — the
+/// narrow predicate for "we can attach with the bare URL"?
+fn probe_dsh(url: &str) -> bool {
+    probe_port_once(url) == Some(PortState::DshAttachable)
+}
+
+/// [`probe_dsh`] with retries; see [`probe_port`].
+fn probe_dsh_with_retries(url: &str, attempts: u32, gap_ms: u64) -> bool {
+    probe_port(url, attempts, gap_ms) == PortState::DshAttachable
 }
 
 fn set_running(app: &AppHandle, server: &Shared, url: &str) {
@@ -1473,12 +1546,31 @@ fn start_inner(app: &AppHandle, server: &Shared) -> Result<(), String> {
     // Attach to an already-running harness on the default port instead of
     // spawning a second instance (two servers would race on ~/.dsh). This
     // happens before resolving node/runtime so attach mode needs nothing.
-    let port = default_port();
+    let mut port = default_port();
     let default_url = format!("http://127.0.0.1:{port}");
-    if probe_dsh_with_retries(&default_url, 2, 250) {
-        push_log(server, format!("检测到已在运行的 dsh 服务，直接使用 {default_url}"));
-        set_running(app, server, &default_url);
-        return Ok(());
+    match probe_port(&default_url, 2, 250) {
+        PortState::DshAttachable => {
+            push_log(server, format!("检测到已在运行的 dsh 服务，直接使用 {default_url}"));
+            set_running(app, server, &default_url);
+            return Ok(());
+        }
+        PortState::DshAuthGated => {
+            // A 0.1.5+ instance is holding the port, and there is nothing to
+            // attach to: its UI needs a per-process `?token=` that only that
+            // process's stdout ever saw. Skip the doomed spawn on an occupied
+            // port and take an OS-assigned one deliberately.
+            push_log(
+                server,
+                format!(
+                    "端口 {port} 已被一个需要浏览器认证的 dsh 实例占用（无法接管），改用系统分配端口…"
+                ),
+            );
+            port = 0;
+        }
+        // Free, or something that isn't ours: fall through and let the child
+        // try the default port (a non-dsh occupant surfaces as EADDRINUSE and
+        // is handled below).
+        PortState::Free | PortState::Foreign => {}
     }
 
     let node = resolve_node(app)?;
@@ -1541,15 +1633,22 @@ fn start_inner(app: &AppHandle, server: &Shared) -> Result<(), String> {
                     detail: i18n::tr(lang, "确认 3080 端口占用情况…", "Checking what's using port 3080…").to_string(),
                 },
             );
-            if probe_dsh_with_retries(&default_url, 3, 400) {
-                push_log(
+            match probe_port(&default_url, 3, 400) {
+                PortState::DshAttachable => {
+                    push_log(
+                        server,
+                        "端口 3080 已被 dsh 服务占用（初始探测超时），直接使用…".to_string(),
+                    );
+                    set_running(app, server, &default_url);
+                    return Ok(());
+                }
+                PortState::DshAuthGated => push_log(
                     server,
-                    "端口 3080 已被 dsh 服务占用（初始探测超时），直接使用…".to_string(),
-                );
-                set_running(app, server, &default_url);
-                return Ok(());
+                    "端口 3080 已被一个需要浏览器认证的 dsh 实例占用（无法接管），改用系统分配端口…"
+                        .to_string(),
+                ),
+                _ => push_log(server, "端口 3080 被其他程序占用，改用系统分配端口…".to_string()),
             }
-            push_log(server, "端口 3080 被其他程序占用，改用系统分配端口…".to_string());
             spawn(app, server, &node, &bin, 0)?;
             return Ok(());
         }
@@ -1620,20 +1719,28 @@ mod tests {
     // `ensureSymlink` (two separate incidents, same shape, different package).
     const REAL_LINE_1: &str = r"Error: dsh: C:\Users\him69\.dsh\profiles\node_modules\@deepseek-ai\cordis-plugin-loader exists and is not a symlink; remove it so dsh can manage the installation fallback";
     const REAL_LINE_2: &str = r"Error: dsh: C:\Users\him69\.dsh\profiles\node_modules\@deepseek-ai\dsh-spill-policy exists and is not a symlink; remove it so dsh can manage the installation fallback";
+    // dsh 0.1.5 widened the same error into two new wordings (dsh-app-boot
+    // lib/index.js:416 and :569). The self-heal must still recover the path
+    // from both — matching the boundary + suffix, not the exact prose.
+    const REAL_LINE_0_1_5_V1: &str = r"Error: dsh: C:\Users\him69\.dsh\profiles\node_modules\@deepseek-ai\cordis-plugin-loader exists and is not a symlink or dsh-managed module proxy; remove it so dsh can manage the installation fallback";
+    const REAL_LINE_0_1_5_V2: &str = r"Error: dsh: C:\Users\him69\.dsh\profiles\node_modules\@deepseek-ai\dsh-spill-policy exists and is not a dsh-managed module proxy; remove it so dsh can manage the installation fallback";
 
-    // Real ready lines captured verbatim from `node bin.js web --port …`
-    // against each kernel, piped stdout (no TTY, so no ANSI wrapping).
-    // 0.1.1-rc.2 and older print a bare URL; 0.1.5-rc.1 appends a per-boot
-    // token, and an unauthenticated `GET /` against it answers 401.
-    const READY_LINE_0_1_1: &str = "dsh web: http://127.0.0.1:3203";
+    // Ready lines from `node bin.js web --port …`, piped stdout (no TTY).
+    // 0.1.1-rc.2 and older print a bare loopback URL; 0.1.5-rc.1 appends a
+    // per-boot token that the caller must keep (an unauthenticated `GET /`
+    // against it answers 401). Bound to all interfaces the line gains a
+    // trailing ` (LAN: …)` note. The token sample is the shape captured from
+    // the npm-current 0.1.5-rc.1 build.
+    const READY_LINE_BARE: &str = "dsh web: http://127.0.0.1:3203";
     const READY_LINE_0_1_5: &str =
-        "dsh web: http://127.0.0.1:3199/?token=URU-pGyfy8ro_XYwM0k0FI5aunTDkb2sta3j27H66tc";
+        "dsh web: http://127.0.0.1:3080/?token=h1cqxxcx0iGAS16m-G_ASm25JGXydkeHSySiRU33t4M";
+    const READY_LINE_WITH_LAN: &str = "dsh web: http://127.0.0.1:3080 (LAN: http://10.0.0.2:3080)";
 
     #[test]
     fn keeps_the_token_from_a_real_0_1_5_ready_line() {
-        // The regression this guards: the URL was previously rebuilt from
-        // the parsed port alone, silently dropping `?token=`. The window
-        // then loaded a 401 instead of the harness.
+        // The regression this guards: rebuilding the URL from the parsed port
+        // alone silently drops `?token=`, and the harness webview then loads a
+        // 401 instead of the harness. Load-bearing, not future-proofing.
         assert_eq!(
             extract_ready_url(READY_LINE_0_1_5),
             Some(READY_LINE_0_1_5.trim_start_matches("dsh web: ").to_string())
@@ -1645,16 +1752,17 @@ mod tests {
         // Bumping `DSH_VERSION_DEFAULT` down (or a user overriding
         // `DSH_DESKTOP_DSH_VERSION` to a pre-0.1.5 kernel) must keep working.
         assert_eq!(
-            extract_ready_url(READY_LINE_0_1_1),
+            extract_ready_url(READY_LINE_BARE),
             Some("http://127.0.0.1:3203".to_string())
         );
     }
 
     #[test]
     fn stops_at_whitespace_after_the_url() {
+        // The real whitespace case: the ` (LAN: …)` note when bound to 0.0.0.0.
         assert_eq!(
-            extract_ready_url("dsh web: http://127.0.0.1:3080/?token=abc then some trailing prose"),
-            Some("http://127.0.0.1:3080/?token=abc".to_string())
+            extract_ready_url(READY_LINE_WITH_LAN),
+            Some("http://127.0.0.1:3080".to_string())
         );
     }
 
@@ -1685,6 +1793,25 @@ mod tests {
     }
 
     #[test]
+    fn extracts_path_from_0_1_5_error_variants() {
+        // The regression this guards: after a kernel bump the exact error
+        // prose changed, and keying on the old full string made the self-heal
+        // silently go dead. Both 0.1.5 wordings must still yield the path.
+        assert_eq!(
+            extract_stale_symlink_path(REAL_LINE_0_1_5_V1),
+            Some(PathBuf::from(
+                r"C:\Users\him69\.dsh\profiles\node_modules\@deepseek-ai\cordis-plugin-loader"
+            ))
+        );
+        assert_eq!(
+            extract_stale_symlink_path(REAL_LINE_0_1_5_V2),
+            Some(PathBuf::from(
+                r"C:\Users\him69\.dsh\profiles\node_modules\@deepseek-ai\dsh-spill-policy"
+            ))
+        );
+    }
+
+    #[test]
     fn ignores_unrelated_lines() {
         assert_eq!(extract_stale_symlink_path("dsh web: http://127.0.0.1:3080"), None);
         assert_eq!(extract_stale_symlink_path(""), None);
@@ -1696,10 +1823,10 @@ mod tests {
 
     #[test]
     fn ignores_marker_without_a_path_prefix() {
-        // Marker present but no "dsh: " prefix before it — malformed/foreign
-        // input should not be parsed as a real dsh error.
+        // Boundary + suffix both present, but no "dsh: " prefix before it —
+        // malformed/foreign input should not be parsed as a real dsh error.
         assert_eq!(
-            extract_stale_symlink_path("exists and is not a symlink; remove it so dsh can manage the installation fallback"),
+            extract_stale_symlink_path("/some/path exists and is not a symlink; remove it so dsh can manage the installation fallback"),
             None
         );
     }
@@ -1791,6 +1918,51 @@ mod tests {
         let _ = stop_tx.send(());
         handle.join().unwrap();
         assert!(detected, "probe should detect the harness index marker");
+    }
+
+    #[test]
+    fn probe_classifies_an_auth_gated_dsh() {
+        use std::io::ErrorKind;
+        use std::sync::mpsc;
+
+        // dsh 0.1.5+ answers an unauthenticated `GET /` like this. The probe
+        // must call it a live-but-unusable dsh, NOT "nothing here" — the
+        // latter made `start_inner` treat an occupied port as free, spawn onto
+        // it, eat an EADDRINUSE, and then start a SECOND server against the
+        // same `~/.dsh`.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let url = format!("http://127.0.0.1:{port}");
+        let (stop_tx, stop_rx) = mpsc::channel::<()>();
+        let handle = thread::spawn(move || loop {
+            match listener.accept() {
+                Ok((mut conn, _)) => {
+                    let body =
+                        "dsh web authentication required; reopen the URL printed by dsh web.\n";
+                    let resp = format!(
+                        "HTTP/1.1 401 Unauthorized\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    if conn.write_all(resp.as_bytes()).is_err() {
+                        break;
+                    }
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => {}
+                Err(_) => break,
+            }
+            if stop_rx.try_recv().is_ok() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        });
+        let state = probe_port(&url, 3, 100);
+        let _ = stop_tx.send(());
+        handle.join().unwrap();
+        assert_eq!(state, PortState::DshAuthGated);
+        // And it must NOT be mistaken for the attachable case.
+        assert!(!probe_dsh(&url));
     }
 
     #[test]

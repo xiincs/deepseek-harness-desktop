@@ -10,7 +10,14 @@ const { getCurrentWindow } = window.__TAURI__.window;
 const els = {
   starting: document.getElementById("state-starting"),
   error: document.getElementById("state-error"),
-  harnessFrame: document.getElementById("harness-frame"),
+  // The slot the harness child webview is positioned over (lib.rs) — the
+  // harness is no longer an <iframe> in this page. See reportHarnessBounds.
+  content: document.getElementById("content"),
+  // Dim backdrop shown over #content when the harness webview is hidden for
+  // an open overlay (see syncHarnessVisibility) — the harness is a native
+  // webview above this page, so it must step aside for menus/dialogs; this
+  // keeps the vacated area from flashing blank white.
+  harnessScrim: document.getElementById("harness-scrim"),
   startingDetail: document.getElementById("starting-detail"),
   errorMessage: document.getElementById("error-message"),
   logBox: document.getElementById("log-box"),
@@ -426,11 +433,80 @@ function initProviderTip() {
 let logsVisible = false;
 let logsStartingVisible = false;
 
+// Current boot state ("starting" | "error" | "running") plus the harness-URL
+// bookkeeping that keeps syncHarnessVisibility from reloading the harness
+// webview every time it's re-shown (e.g. after an overlay closes). harnessUrl
+// is the URL the server last reported Running at; harnessNavigatedUrl is what
+// the webview has actually been pointed at, so we navigate exactly once per
+// URL and otherwise just reveal it.
+let currentState = "starting";
+let harnessUrl = null;
+let harnessNavigatedUrl = null;
+
 function show(id) {
+  currentState = id;
   for (const key of ["starting", "error"]) {
     els[key].classList.toggle("hidden", key !== id);
   }
-  els.harnessFrame.classList.toggle("hidden", id !== "running");
+  syncHarnessVisibility();
+}
+
+// Report the content-region geometry to the harness child webview, in the
+// PHYSICAL pixels lib.rs's harness_set_bounds expects (CSS px × devicePixelRatio).
+// Called on every window/dock resize (ResizeObserver in init) and before a show.
+function reportHarnessBounds() {
+  const r = els.content.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  invoke("harness_set_bounds", {
+    x: Math.round(r.left * dpr),
+    y: Math.round(r.top * dpr),
+    width: Math.round(r.width * dpr),
+    height: Math.round(r.height * dpr),
+  }).catch(() => {});
+}
+
+// True when a shell surface is painting over the content region. The harness
+// is a sibling *native* webview stacked above this page, so it would occlude
+// these DOM overlays (making them invisible/unclickable) — it must be hidden
+// while any is open and revealed again when they all close.
+function harnessOccluded() {
+  // Only surfaces that actually paint *over the content region*: the three
+  // full-window modals and the top-left app-menu dropdown (which drops down
+  // from the toolbar into the content area). The file-tree context menu is
+  // deliberately excluded — it opens over the dock, not the harness, so
+  // blanking the whole harness on every right-click would be pure noise.
+  const overlays = [
+    els.pluginMarketOverlay,
+    els.confirmDialogOverlay,
+    els.closeChoiceOverlay,
+    els.appMenu,
+  ];
+  return overlays.some((el) => el && !el.classList.contains("hidden"));
+}
+
+// Single source of truth for harness-webview visibility: shown only when the
+// server is running AND nothing in the shell is painting over the content
+// region. Navigates lazily (once per URL) so re-showing after an overlay
+// closes doesn't reload — and lose — the harness page's state.
+function syncHarnessVisibility() {
+  const running = currentState === "running";
+  const occluded = harnessOccluded();
+  if (running && harnessUrl && !occluded) {
+    reportHarnessBounds();
+    if (harnessNavigatedUrl !== harnessUrl) {
+      harnessNavigatedUrl = harnessUrl;
+      invoke("harness_show", { url: harnessUrl }).catch(() => {}); // navigate + show
+    } else {
+      invoke("harness_reveal").catch(() => {}); // show only, no reload
+    }
+  } else {
+    invoke("harness_hide").catch(() => {});
+  }
+  // When a running harness is hidden *because an overlay is open*, dim the
+  // vacated #content instead of letting it flash blank white — so the menu/
+  // dialog reads as a normal "dimmed background". Not shown in boot/error
+  // states (their cards already fill #content).
+  els.harnessScrim.classList.toggle("hidden", !(running && occluded));
 }
 
 async function loadLogsInto(box) {
@@ -459,8 +535,12 @@ function toggleLogsStarting() {
 function render(status) {
   switch (status.state) {
     case "running":
+      // Record the ready URL the server reported (token included — see
+      // server.rs's extract_ready_url); show("running") →
+      // syncHarnessVisibility navigates the harness webview to it and reveals
+      // it (unless an overlay is up). Navigation is deduped there.
+      harnessUrl = status.url || null;
       show("running");
-      els.harnessFrame.src = status.url;
       refreshPanel();
       break;
     case "starting":
@@ -469,13 +549,19 @@ function render(status) {
       els.startingDetail.textContent = status.detail || t("preparingLocalService");
       break;
     case "stopped":
+      // Server gone: force a fresh navigation on the next Running (a restart
+      // usually gets a new port *and* a new ?token= anyway) and let
+      // syncHarnessVisibility
+      // hide the now-dead harness.
+      harnessUrl = null;
+      harnessNavigatedUrl = null;
       show("error");
-      els.harnessFrame.src = "about:blank";
       els.errorMessage.textContent = t("serviceStopped", status.code ?? "?") + (status.message ? `\n${status.message}` : "");
       break;
     case "error":
+      harnessUrl = null;
+      harnessNavigatedUrl = null;
       show("error");
-      els.harnessFrame.src = "about:blank";
       els.errorMessage.textContent = status.message || t("unknownError");
       break;
     default:
@@ -558,11 +644,11 @@ function initAppMenu() {
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && isAppMenuOpen()) closeAppMenu();
   });
-  // #harness-frame covers virtually the whole window below the toolbar, and
-  // a click landing inside it fires in that iframe's own document — it
-  // never bubbles to the listener above. But clicking into an iframe always
-  // shifts focus into its content window first, which fires "blur" on the
-  // top-level window, so that's the signal this actually listens for.
+  // The harness webview covers virtually the whole window below the toolbar,
+  // and a click landing in it goes to that separate webview — it never
+  // bubbles to the listener above. But clicking into another webview shifts
+  // OS focus out of this shell webview, firing "blur" on this window, so
+  // that's the signal this actually listens for.
   window.addEventListener("blur", () => {
     if (isAppMenuOpen()) closeAppMenu();
   });
@@ -2805,16 +2891,17 @@ async function refreshPanel() {
 // whole lifetime.
 const PANEL_POLL_MS = 6000;
 
-// ── file-mention bridge (harness iframe → dock) ─────────────────────────
+// ── file-mention bridge (harness webview → dock) ────────────────────────
 //
-// lib.rs's inject_file_mention_bridge injects a capture-phase click
-// listener directly into the harness iframe's document (WebView2's
-// AddScriptToExecuteOnDocumentCreated) — the harness itself has no
-// postMessage channel of its own and isn't this repo's source to add one
-// to. That injected script intercepts a file-mention button's default
-// "open" action and posts {source:"dsh-desktop", type:"open-file-mention",
-// path: "<absolute path>"} to window.top instead. This listener is the
-// other end of that bridge.
+// lib.rs's wire_harness_file_mentions injects a capture-phase click listener
+// into the harness webview's document (WebView2's AddScriptToExecuteOnDocumentCreated)
+// — the harness itself has no postMessage channel of its own and isn't this
+// repo's source to add one to. That injected script intercepts a file-mention
+// button's default "open" action and posts {source:"dsh-desktop",
+// type:"open-file-mention", path: "<absolute path>"} over the WebView2 *host*
+// channel; Rust validates it and re-emits it as the Tauri `open-file-mention`
+// event, which initFileMentionBridge listens for. This function is the other
+// end of that bridge.
 //
 // The path arrives absolute (it's the button's own title attribute, an OS
 // path), but every panel command (get_workspace_tree/get_editable_preview/…)
@@ -2916,16 +3003,17 @@ async function handleFileMention(absPath) {
   revealSelectedTreeRow();
 }
 
-window.addEventListener("message", (event) => {
-  // Only the harness iframe itself is a legitimate sender — the injected
-  // script runs inside that document and nowhere else, and nothing else in
-  // this page's world has a reason to post this message shape.
-  if (event.source !== els.harnessFrame.contentWindow) return;
-  const data = event.data;
-  if (!data || data.source !== "dsh-desktop" || data.type !== "open-file-mention") return;
-  if (typeof data.path !== "string" || !data.path) return;
-  handleFileMention(data.path);
-});
+// The other end of the file-mention bridge is a Tauri event, emitted by
+// lib.rs's wire_harness_file_mentions from the harness webview's WebView2
+// message channel. (It used to be a window `message` from the harness iframe;
+// the harness is now a separate top-level webview with no shared frame tree,
+// so that channel is gone.) The payload is the absolute path string.
+function initFileMentionBridge() {
+  listen("open-file-mention", (event) => {
+    const path = event.payload;
+    if (typeof path === "string" && path) handleFileMention(path);
+  });
+}
 
 // ── init ─────────────────────────────────────────────────────────────────
 
@@ -2937,6 +3025,24 @@ async function init() {
   initCardsResizeHandle();
   syncCardResizeHandleVisibility();
   initWindowChrome();
+
+  // Keep the harness child webview glued to the content region and correctly
+  // shown/hidden. ResizeObserver fires on window resize and dock open/resize
+  // (both reshape #content); MutationObserver fires when a shell overlay opens
+  // or closes (which must hide/reveal the harness — see harnessOccluded).
+  const harnessResizeObserver = new ResizeObserver(() => {
+    if (currentState === "running") reportHarnessBounds();
+  });
+  harnessResizeObserver.observe(els.content);
+  const harnessOverlayObserver = new MutationObserver(() => syncHarnessVisibility());
+  for (const el of [
+    els.pluginMarketOverlay,
+    els.confirmDialogOverlay,
+    els.closeChoiceOverlay,
+    els.appMenu,
+  ]) {
+    if (el) harnessOverlayObserver.observe(el, { attributes: true, attributeFilter: ["class"] });
+  }
   // macOS uses the native title bar buttons and native top menu bar; the
   // custom window controls and the in-window hamburger menu are both
   // hidden there (see styles.css body.platform-decorated) and would only
@@ -2958,6 +3064,7 @@ async function init() {
   }
 
   listen("server-status", (event) => render(event.payload));
+  initFileMentionBridge();
   // Every tab's reader thread emits on this same global event name, tagged
   // with its own id (terminal.rs's spawn_reader) — a tab already closed
   // client-side (terminalTabs.delete) but whose backend session hadn't

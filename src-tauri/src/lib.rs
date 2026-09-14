@@ -5,6 +5,22 @@
 //! remote page and is never granted Tauri IPC access — `dangerousRemoteDomainIpcAccess`
 //! is not enabled. All shell actions go through the native menu/tray and the
 //! local boot page.
+//!
+//! Window layout: two webviews share the one window. The *shell* webview is
+//! the config-created "main" (loads `tauri.localhost` → `ui/`; has IPC) and
+//! draws the toolbar, boot/error states, dock, and all overlays. The *harness*
+//! webview ([`HARNESS_WEBVIEW_LABEL`]) is a child created here in `setup`; it
+//! navigates *top-level* to the ready URL dsh prints (which carries a required
+//! `?token=`), so the harness is same-site with itself and its `SameSite=Strict`
+//! `dsh-auth-*` cookie is actually stored and sent — the whole UI is behind that
+//! browser auth, and an `<iframe>` under `tauri.localhost` is cross-site, so the
+//! cookie could never take effect there and the window showed only the 401 line
+//! (see `server::DSH_VERSION_DEFAULT`). Because it
+//! loads an external origin, the harness webview gets no IPC *by construction*,
+//! keeping the boundary above. `ui/app.js` positions it over the content
+//! region (`harness_set_bounds`) and shows/hides it (`harness_show`/
+//! `harness_hide`) as the server state and shell overlays change — a sibling
+//! native webview would otherwise occlude the shell's own DOM overlays.
 
 mod i18n;
 mod menu;
@@ -192,7 +208,7 @@ fn get_git_status(
 /// The panel's workspace-name label when in auto mode. Re-resolved on every
 /// panel refresh (not cached at startup like `get_info`'s other fields)
 /// since the harness's own in-page workspace selection — entirely inside
-/// the iframe, with no signal reaching this shell directly — can change
+/// the harness webview, with no signal reaching this shell directly — can change
 /// independently of anything else this shell observes. See
 /// `panel::active_workspace_dir`. Not called at all once the client has a
 /// manual-picker choice locked in — it already knows what to show.
@@ -520,7 +536,7 @@ fn show_main_window_on_relaunch(app: &AppHandle) {
 /// remote harness page out from under its own client-side state, and
 /// re-open the DevTools access `disable_devtools` closes below) go, while
 /// everything else — Copy chief among them — stays.
-fn disable_context_menu(win: &tauri::WebviewWindow) {
+fn disable_context_menu(win: &tauri::Webview) {
     use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2Controller, ICoreWebView2_11};
     use windows::core::{Interface, PWSTR};
     let _ = win.with_webview(|webview| {
@@ -562,13 +578,13 @@ fn disable_context_menu(win: &tauri::WebviewWindow) {
     });
 }
 #[cfg(not(windows))]
-fn disable_context_menu(_win: &tauri::WebviewWindow) {}
+fn disable_context_menu(_win: &tauri::Webview) {}
 
 #[cfg(windows)]
 /// Embedded WebView2 controls (no visible browser chrome to show a
 /// permission prompt) default every permission-gated Web API — clipboard
 /// included — to Deny unless the host explicitly grants it here. The
-/// iframed harness page's own message Copy button calls the standard
+/// harness page's own message Copy button calls the standard
 /// `navigator.clipboard.writeText()`; under that default it rejects, and
 /// the page's own caller swallows the rejection silently (`if (!ok)
 /// return;`), which just looks like the button does nothing (see GitHub
@@ -581,7 +597,7 @@ fn disable_context_menu(_win: &tauri::WebviewWindow) {}
 /// unhandled, which resolves to WebView2's own default Deny. Same
 /// one-time-at-setup reasoning as `disable_context_menu`: a
 /// `CoreWebView2`-level event registration, not a per-page one.
-fn allow_clipboard_permission(win: &tauri::WebviewWindow) {
+fn allow_clipboard_permission(win: &tauri::Webview) {
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         ICoreWebView2Controller, COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ,
         COREWEBVIEW2_PERMISSION_STATE_ALLOW,
@@ -613,7 +629,7 @@ fn allow_clipboard_permission(win: &tauri::WebviewWindow) {
     });
 }
 #[cfg(not(windows))]
-fn allow_clipboard_permission(_win: &tauri::WebviewWindow) {}
+fn allow_clipboard_permission(_win: &tauri::Webview) {}
 
 /// Disables Ctrl+scroll / Ctrl+±/0 page zoom entirely. Nothing in this app's
 /// own UI (boot page or tray) exposes a zoom control — it's purely the
@@ -624,7 +640,7 @@ fn allow_clipboard_permission(_win: &tauri::WebviewWindow) {}
 /// `disable_context_menu`: this is a `CoreWebView2` setting, not a per-page
 /// one, so it holds across every later `navigate()` call.
 #[cfg(windows)]
-fn disable_zoom_control(win: &tauri::WebviewWindow) {
+fn disable_zoom_control(win: &tauri::Webview) {
     use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller;
     let _ = win.with_webview(|webview| {
         let controller: ICoreWebView2Controller = webview.controller();
@@ -640,7 +656,7 @@ fn disable_zoom_control(win: &tauri::WebviewWindow) {
     });
 }
 #[cfg(not(windows))]
-fn disable_zoom_control(_win: &tauri::WebviewWindow) {}
+fn disable_zoom_control(_win: &tauri::Webview) {}
 
 /// Disables WebView2's built-in DevTools (F12 / Ctrl+Shift+I / right-click →
 /// 检查) in release builds only — debug builds keep it, since it's the
@@ -651,7 +667,7 @@ fn disable_zoom_control(_win: &tauri::WebviewWindow) {}
 /// user who triggers it by accident, and leaving it reachable in a shipped
 /// build is needless extra attack surface for no product benefit here.
 #[cfg(all(windows, not(debug_assertions)))]
-fn disable_devtools(win: &tauri::WebviewWindow) {
+fn disable_devtools(win: &tauri::Webview) {
     use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller;
     let _ = win.with_webview(|webview| {
         let controller: ICoreWebView2Controller = webview.controller();
@@ -667,41 +683,50 @@ fn disable_devtools(win: &tauri::WebviewWindow) {
     });
 }
 #[cfg(not(all(windows, not(debug_assertions))))]
-fn disable_devtools(_win: &tauri::WebviewWindow) {}
+fn disable_devtools(_win: &tauri::Webview) {}
 
-/// Intercepts clicks on the harness's own file-mention buttons (e.g. a
-/// message referencing `index.html` renders one inline) and redirects them
-/// into this shell's own file dock instead of their default "open" action.
-///
-/// The harness is a plain remote page with no Tauri IPC access (see the
-/// module doc comment) and ships no `postMessage` channel of its own to
-/// piggyback on (see `panel.rs`'s "active workspace" section) — its source
-/// (`deepseek-ai/deepseek-harness`) isn't part of this repo either, so
-/// there's no click handler here to edit directly. `AddScriptToExecuteOnDocumentCreated`
-/// runs in every document WebView2 creates, including this iframe's, which
-/// makes the origin boundary a non-issue: the script executes as same-origin
-/// content of the page it's injected into, same as the harness's own
-/// scripts, and the resulting `postMessage` is exactly the kind of
-/// cross-origin signal that boundary was always meant to allow through —
-/// nothing here grants the harness page any *new* capability (no IPC, no
-/// filesystem access), it only ever gets to ask its own parent window to
-/// open something the parent already has every right to open.
-///
-/// Matched on `aria-label`/`title` shape (a "打开 <path>" label alongside a
-/// `title` holding that same absolute path) rather than the button's CSS
-/// class: that class is bundler-hashed (CSS Modules) and free to change on
-/// every harness rebuild, while the label text is the actual user-facing
-/// contract. Capture-phase so this runs before the harness's own click
-/// handler on the same button can act — `stopPropagation` then keeps that
-/// handler from ever seeing the event at all, not just from acting after us.
+/// Message the injected file-mention script posts over the WebView2 host
+/// channel (see [`wire_harness_file_mentions`]).
 #[cfg(windows)]
-fn inject_file_mention_bridge(win: &tauri::WebviewWindow) {
-    use webview2_com::AddScriptToExecuteOnDocumentCreatedCompletedHandler;
+#[derive(serde::Deserialize)]
+struct FileMentionMsg {
+    source: String,
+    #[serde(rename = "type")]
+    kind: String,
+    path: String,
+}
+
+/// Wires the harness's file-mention buttons ("打开 <path>") to this shell's
+/// file dock. The harness renders in its own top-level webview with no Tauri
+/// IPC (see the module doc comment) and ships no `postMessage` channel of its
+/// own; its source (`deepseek-ai/deepseek-harness`) isn't part of this repo,
+/// so there's no click handler to edit directly. Two WebView2-level hooks on
+/// the *harness* webview's own controller do it:
+///
+///  1. `AddScriptToExecuteOnDocumentCreated` injects a capture-phase click
+///     interceptor that recognizes those buttons by their `aria-label`/`title`
+///     shape (a "打开 <path>" label alongside a `title` holding that absolute
+///     path — matched on the user-facing label, not the bundler-hashed CSS
+///     class that changes every harness rebuild) and forwards the path via
+///     `window.chrome.webview.postMessage`. That is the WebView2 *host*
+///     channel, distinct from Tauri IPC: the harness has none, but this native
+///     channel is always present and nothing else in that webview uses it.
+///  2. `add_WebMessageReceived` validates the message shape and re-emits it as
+///     the Tauri `open-file-mention` event, which `ui/app.js` (in the
+///     IPC-having shell webview) listens for. Nothing here grants the harness
+///     any new capability — it only ever asks the shell to open something the
+///     shell already may open.
+///
+/// (Before the top-level-webview migration this was one injection into the
+/// shell webview relying on the harness being a child `<iframe>` and
+/// `window.top.postMessage`; that shared frame tree is gone now.)
+#[cfg(windows)]
+fn wire_harness_file_mentions(app: &AppHandle, harness: &tauri::Webview) {
     use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller;
-    use windows::core::HSTRING;
+    use webview2_com::{AddScriptToExecuteOnDocumentCreatedCompletedHandler, WebMessageReceivedEventHandler};
+    use windows::core::{HSTRING, PWSTR};
 
     const SCRIPT: &str = r#"(function () {
-  if (window.top === window) return;
   document.addEventListener(
     "click",
     function (event) {
@@ -713,7 +738,11 @@ fn inject_file_mention_bridge(win: &tauri::WebviewWindow) {
           if (label.indexOf("打开 ") === 0 && path) {
             event.preventDefault();
             event.stopPropagation();
-            window.top.postMessage({ source: "dsh-desktop", type: "open-file-mention", path: path }, "*");
+            if (window.chrome && window.chrome.webview) {
+              window.chrome.webview.postMessage(
+                JSON.stringify({ source: "dsh-desktop", type: "open-file-mention", path: path }),
+              );
+            }
             return;
           }
         }
@@ -724,25 +753,56 @@ fn inject_file_mention_bridge(win: &tauri::WebviewWindow) {
   );
 })();"#;
 
-    let _ = win.with_webview(|webview| {
+    let app = app.clone();
+    let _ = harness.with_webview(move |webview| {
         let controller: ICoreWebView2Controller = webview.controller();
         let result: webview2_com::Result<()> = (|| {
             let core = unsafe { controller.CoreWebView2() }?;
-            AddScriptToExecuteOnDocumentCreatedCompletedHandler::wait_for_async_operation(
-                Box::new(move |handler| unsafe {
-                    core.AddScriptToExecuteOnDocumentCreated(&HSTRING::from(SCRIPT), &handler)
-                        .map_err(Into::into)
-                }),
-                Box::new(|_result, _id| Ok(())),
-            )
+            {
+                // Fire-and-forget: registration is async in WebView2, but we
+                // don't need the returned script id. Deliberately NOT
+                // `wait_for_async_operation` — that blocks the calling thread
+                // until the WebView2 async op completes, and setup runs on the
+                // event-loop thread, so waiting there deadlocks the app before
+                // it ever reaches `server::start` (symptom: window with no
+                // harness, nothing on stdout, port never bound).
+                let handler = AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(
+                    Box::new(|_result, _id| Ok(())),
+                );
+                unsafe {
+                    core.AddScriptToExecuteOnDocumentCreated(&HSTRING::from(SCRIPT), &handler)?;
+                }
+            }
+            let mut token = Default::default();
+            unsafe {
+                core.add_WebMessageReceived(
+                    &WebMessageReceivedEventHandler::create(Box::new(move |_sender, args| {
+                        let Some(args) = args else { return Ok(()) };
+                        let mut msg = PWSTR::null();
+                        args.TryGetWebMessageAsString(&mut msg)?;
+                        let raw = msg.to_string().unwrap_or_default();
+                        if let Ok(m) = serde_json::from_str::<FileMentionMsg>(&raw) {
+                            if m.source == "dsh-desktop"
+                                && m.kind == "open-file-mention"
+                                && !m.path.is_empty()
+                            {
+                                let _ = app.emit("open-file-mention", m.path);
+                            }
+                        }
+                        Ok(())
+                    })),
+                    &mut token,
+                )?;
+            }
+            Ok(())
         })();
         if let Err(e) = result {
-            eprintln!("[dsh-desktop] failed to inject file-mention bridge script: {e}");
+            eprintln!("[dsh-desktop] failed to wire harness file-mention bridge: {e}");
         }
     });
 }
 #[cfg(not(windows))]
-fn inject_file_mention_bridge(_win: &tauri::WebviewWindow) {}
+fn wire_harness_file_mentions(_app: &AppHandle, _harness: &tauri::Webview) {}
 
 /// Routes every outbound `http(s)` link — `target="_blank"`/`window.open`
 /// (`NewWindowRequested`) and plain top-level navigation
@@ -763,7 +823,7 @@ fn inject_file_mention_bridge(_win: &tauri::WebviewWindow) {}
 /// `127.0.0.1`/`localhost` URLs are left alone in both handlers — that's the
 /// harness's own page loading, not an outbound link.
 #[cfg(windows)]
-fn install_external_link_handlers(app: &AppHandle, win: &tauri::WebviewWindow) {
+fn install_external_link_handlers(app: &AppHandle, win: &tauri::Webview) {
     use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller;
     use webview2_com::{take_pwstr, NavigationStartingEventHandler, NewWindowRequestedEventHandler};
     use windows::core::PWSTR;
@@ -836,7 +896,7 @@ fn install_external_link_handlers(app: &AppHandle, win: &tauri::WebviewWindow) {
     });
 }
 #[cfg(not(windows))]
-fn install_external_link_handlers(_app: &AppHandle, _win: &tauri::WebviewWindow) {}
+fn install_external_link_handlers(_app: &AppHandle, _win: &tauri::Webview) {}
 
 // ── menu / tray actions ──────────────────────────────────────────────────────
 
@@ -878,6 +938,67 @@ fn handle_menu_action(app: &AppHandle, id: &str) {
             app.exit(0);
         }
         _ => {}
+    }
+}
+
+// ── harness child webview ──────────────────────────────────────────────────
+//
+// The harness (dsh web UI) renders here, not in an <iframe> in the shell page,
+// so it is the top-level document — the only arrangement in which dsh 0.1.5's
+// `SameSite=Strict` auth cookie is stored and sent (see the module doc comment).
+// Created hidden in `setup`; ui/app.js drives it through the commands below.
+// Navigation is deduped on the JS side (it tracks the ready URL from the
+// `server-status` event), which is why these stay stateless.
+
+/// Label of the child webview that hosts the harness. Looked up by
+/// `Manager::get_webview` in the commands below.
+const HARNESS_WEBVIEW_LABEL: &str = "harness";
+
+/// Position/size the harness webview over the shell's content region.
+/// Coordinates are **physical pixels** relative to the window client area
+/// (ui/app.js multiplies its CSS-pixel content rect by `devicePixelRatio`).
+#[tauri::command]
+fn harness_set_bounds(app: AppHandle, x: i32, y: i32, width: u32, height: u32) {
+    if let Some(hv) = app.get_webview(HARNESS_WEBVIEW_LABEL) {
+        let _ = hv.set_bounds(tauri::Rect {
+            position: tauri::PhysicalPosition::new(x, y).into(),
+            // A zero dimension can drop the WebView2 controller into a bad
+            // state on some builds; never hand it one.
+            size: tauri::PhysicalSize::new(width.max(1), height.max(1)).into(),
+        });
+    }
+}
+
+/// Navigate the harness webview to `url` (the ready URL from the server), then
+/// show it. Only called when entering the running state or when the URL
+/// changes — ui/app.js does the deduping, so this always navigates.
+#[tauri::command]
+fn harness_show(app: AppHandle, url: String) {
+    if let Some(hv) = app.get_webview(HARNESS_WEBVIEW_LABEL) {
+        if let Ok(parsed) = url.parse::<tauri::Url>() {
+            let _ = hv.navigate(parsed);
+        }
+        let _ = hv.show();
+    }
+}
+
+/// Just show the harness webview at its current URL, no navigation — used to
+/// bring it back after a shell overlay that had hidden it closes, without
+/// reloading (and losing) the harness page's state.
+#[tauri::command]
+fn harness_reveal(app: AppHandle) {
+    if let Some(hv) = app.get_webview(HARNESS_WEBVIEW_LABEL) {
+        let _ = hv.show();
+    }
+}
+
+/// Hide the harness webview so the shell's own content (boot/error cards, or a
+/// full-window overlay like the plugin market or a dialog) can paint over the
+/// content region a sibling native webview would otherwise occlude.
+#[tauri::command]
+fn harness_hide(app: AppHandle) {
+    if let Some(hv) = app.get_webview(HARNESS_WEBVIEW_LABEL) {
+        let _ = hv.hide();
     }
 }
 
@@ -1006,7 +1127,11 @@ pub fn run() {
             terminal::terminal_spawn,
             terminal::terminal_write,
             terminal::terminal_resize,
-            terminal::terminal_close
+            terminal::terminal_close,
+            harness_set_bounds,
+            harness_show,
+            harness_reveal,
+            harness_hide
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -1024,23 +1149,71 @@ pub fn run() {
             // two independent ones.
             let close_action = Mutex::new(load_close_action(&handle));
 
-            // The container page (ui/) hosts the harness in an <iframe> and
-            // never navigates its own top level — these WebView2-level
-            // settings hold for its whole lifetime, including content
-            // rendered inside that iframe (ContextMenuRequested and the
-            // zoom/DevTools settings are control-level, not frame-level).
+            // WebView2-level settings for the *shell* webview (which draws the
+            // toolbar, boot/error states, dock, and overlays). They hold for
+            // its whole lifetime.
+            //
+            // These are all control-level (`CoreWebView2` event registrations /
+            // settings), so they used to cover the harness too, back when it
+            // was an <iframe> inside this webview's document tree. It is now a
+            // separate child webview with its own controller, so the harness
+            // needs the same set applied to *its* controller — done in the
+            // creation block below. Miss that and the harness silently loses
+            // context-menu suppression, zoom lock, the clipboard grant, and
+            // (worst) external-link routing, which would leave `target="_blank"`
+            // links swallowed by WebView2's popup blocker and plain outbound
+            // links navigating the harness away with no way back.
             if let Some(win) = app.get_webview_window("main") {
-                disable_context_menu(&win);
-                disable_zoom_control(&win);
-                disable_devtools(&win);
-                allow_clipboard_permission(&win);
-                inject_file_mention_bridge(&win);
-                install_external_link_handlers(&handle, &win);
+                let shell: &tauri::Webview = win.as_ref();
+                disable_context_menu(shell);
+                disable_zoom_control(shell);
+                disable_devtools(shell);
+                allow_clipboard_permission(shell);
+                install_external_link_handlers(&handle, shell);
                 // Windows-only: makes the maximized window's top strip
                 // deliver hover/click to the web content instead of a
-                // resize cursor — see window_proc.rs.
+                // resize cursor — see window_proc.rs. Window-level (not a
+                // webview setting), so it stays on the WebviewWindow.
                 #[cfg(windows)]
                 window_proc::patch_maximized_hit_test(&win);
+            }
+
+            // The harness webview (see the module doc comment): a child of the
+            // main window that ui/app.js navigates top-level to the dsh URL.
+            // Starts at about:blank and hidden; app.js positions it over the
+            // content region and shows it once the server reports Running.
+            // Loading an external origin, it never receives Tauri IPC — the
+            // boundary we mean to keep. Initial bounds are a throwaway (it is
+            // hidden until app.js sends real ones via `harness_set_bounds`).
+            if let Some(win) = app.get_window("main") {
+                match win.add_child(
+                    tauri::webview::WebviewBuilder::new(
+                        HARNESS_WEBVIEW_LABEL,
+                        tauri::WebviewUrl::External("about:blank".parse().unwrap()),
+                    ),
+                    tauri::LogicalPosition::new(0.0, 0.0),
+                    tauri::LogicalSize::new(320.0, 240.0),
+                ) {
+                    Ok(harness) => {
+                        let _ = harness.hide();
+                        // The same control-level WebView2 settings the shell
+                        // gets above — the harness is its own controller now,
+                        // so it no longer inherits them from the shell's (see
+                        // that block's comment; `install_external_link_handlers`
+                        // and `allow_clipboard_permission` matter most here,
+                        // being specifically about the harness page's links and
+                        // Copy buttons). No-ops off Windows.
+                        disable_context_menu(&harness);
+                        disable_zoom_control(&harness);
+                        disable_devtools(&harness);
+                        allow_clipboard_permission(&harness);
+                        install_external_link_handlers(&handle, &harness);
+                        // Route the harness's file-mention buttons into the
+                        // file dock — see `wire_harness_file_mentions`.
+                        wire_harness_file_mentions(&handle, &harness);
+                    }
+                    Err(e) => eprintln!("[dsh-desktop] failed to create harness webview: {e}"),
+                }
             }
 
             // `decorations: false` in tauri.conf.json gives the frameless

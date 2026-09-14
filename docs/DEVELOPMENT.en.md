@@ -30,7 +30,7 @@ so it is fast and offline after the first run.
 | `DSH_DESKTOP_NODE` | Absolute path to `node.exe` to use instead of the one on `PATH` |
 | `DSH_DESKTOP_DSH_BIN` | Absolute path to a `dsh` `lib/bin.js` (e.g. a local checkout) |
 | `DSH_DESKTOP_RUNTIME_DIR` | Where the managed `@deepseek-ai/dsh` runtime is installed (default: app cache dir); point it at an existing `node_modules` root to skip the first-run npm install |
-| `DSH_DESKTOP_DSH_VERSION` | npm version spec for the managed runtime (default `0.1.1-rc.2` — deliberately behind npm's `latest`; see "Why the pinned version may lag" below) |
+| `DSH_DESKTOP_DSH_VERSION` | npm version spec for the managed runtime (default `0.1.5-rc.1`, matching npm's `latest`; override it to try a version that hasn't been promoted yet) |
 | `DSH_DESKTOP_PORT` | Default bind port override (default `3080`); handy for running several instances |
 | `DSH_DESKTOP_CWD` | Working directory for the `dsh` server process (default: user home) |
 | `DSH_HOME` | Passed through to the server; harness data root (default `~/.dsh`) |
@@ -142,28 +142,41 @@ has been verified not to run in this shell**, and the script then treats being b
 expected outcome rather than a failure. Today that table holds exactly one entry,
 `0.1.5-rc.1`.
 
-The cause isn't a bug — it's a deliberate upstream security design. dsh 0.1.5 puts the whole UI
-behind browser authentication: the cookie is `SameSite=Strict`, and before that is even
-consulted, any cross-site request is refused by `api-request-trust` (a cross-site
-`Sec-Fetch-Site` gets 403; an unauthenticated one gets 401). This repo happens to host the
-harness in a **cross-site** `<iframe>` — the outer page is `tauri.localhost`, the iframe points
-at `127.0.0.1:<port>` — so every request the harness makes is cross-site, and the window can only
-ever show `dsh web authentication required`.
+The cause isn't a bug — it's upstream's deliberate browser authentication, and it **requires
+same-site**. Measured against the `0.1.5-rc.1` npm currently publishes:
 
-That conclusion was measured, not inferred: running both kernels side by side in the identical
-cross-site iframe, `0.1.1-rc.2` renders the harness boot screen and `0.1.5-rc.1` renders that 401
-line. (Relatedly, `server.rs` used to drop the `?token=` when parsing the startup URL, rebuilding
-it from the port alone — a second problem introduced by the same kernel bump. It now passes the
-printed URL through verbatim, but on its own that is not enough to make 0.1.5 work, for the
-cross-site reason above.)
+- the startup line becomes `dsh web: http://127.0.0.1:<port>/?token=<secret>` — the **token is
+  required**;
+- `GET /` without a cookie always answers **401** `dsh web authentication required; reopen the URL
+  printed by dsh web.`;
+- `GET /?token=<secret>` answers **303** back to `/` and sets a `dsh-auth-<authority>` cookie
+  (`HttpOnly; SameSite=Strict; Path=/`, bound to `host:port`);
+- `/api/*` without the cookie is **401**; with `Sec-Fetch-Site: cross-site` it is **403**
+  (`api-request-trust`).
 
-**Adopting 0.1.5+ therefore requires an architecture change first**: load the harness as a
-**top-level document** (Tauri multi-webview — the main webview navigates straight to the harness
-URL, the dock becomes a second webview in the same window that keeps loading from
-`tauri.localhost` so it retains IPC). Only then is the harness same-site with itself and the
-cookie usable; the harness still gets no Tauri IPC, since `dangerousRemoteDomainIpcAccess` stays
-off and remote origins are never injected with it. Do **not** try to make the iframe same-site by
-moving the shell page onto `127.0.0.1` as well — that needs remote-IPC access granted to that
-origin, which would hand it to the harness's port too and break the "harness pages get zero IPC"
-boundary outright. Until that refactor lands, `DSH_VERSION_DEFAULT` stays on `0.1.1-rc.2`.
+A `SameSite=Strict` cookie is only stored and sent when the harness **is itself the top-level
+document**. This repo used to host it in a **cross-site** `<iframe>` (outer page `tauri.localhost`,
+iframe pointing at `127.0.0.1:<port>`), where that cookie can never take effect — leaving only that
+401 line in the window. Relatedly, `server.rs` used to drop everything after the port when parsing
+the startup URL; that also discarded the token, so preserving the whole URL is **required**, not
+merely nice.
+
+⚠️ **A genuinely misleading upstream behaviour**: these 0.x prerelease packages get **republished**
+(same version string, different contents — `prepare-runtime.mjs`'s comment says as much). Reading
+the older Sep-10 copy in `~/.dsh` (whose build had the auth unwired: `/` served unauthenticated and
+the ready line had no token) once led to the false conclusion that 0.1.5 had no authentication at
+all. **Judge auth behaviour against what npm currently publishes**, never against a stale local
+copy.
+
+**Adopting 0.1.5+ required an architecture change first — and that change has now landed**: the
+harness renders as a **top-level document** in a child webview of the same window (Tauri's
+`unstable` `Window::add_child`; see `HARNESS_WEBVIEW_LABEL` in `lib.rs`), while the shell
+(toolbar/dock/overlays) keeps running in the `tauri.localhost` webview so it retains IPC. The
+harness is then same-origin with itself, its `/api` calls are same-origin, and they pass that 403.
+The harness still gets no Tauri IPC, since `dangerousRemoteDomainIpcAccess` stays off and remote
+origins are never injected with it. Do **not** try to make the iframe same-origin by moving the
+shell page onto `127.0.0.1` as well — that needs remote-IPC access granted to that origin, which
+would hand it to the harness's port too and break the "harness pages get zero IPC"
+boundary outright. `DSH_VERSION_DEFAULT` now tracks `0.1.5-rc.1`, and the `NOT_ADOPTABLE` table is
+empty — the blocker was fixed rather than tolerated.
 </content>
