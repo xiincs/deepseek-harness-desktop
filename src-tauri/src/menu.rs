@@ -18,6 +18,7 @@ use crate::i18n;
 pub const MENU_OPEN_BROWSER: &str = "open_browser";
 pub const MENU_RESTART: &str = "restart";
 pub const MENU_OPEN_DATA_DIR: &str = "open_data_dir";
+pub const MENU_SET_WORKSPACE: &str = "set_workspace";
 pub const MENU_SHOW_WINDOW: &str = "show_window";
 pub const MENU_TOGGLE_AUTOSTART: &str = "toggle_autostart";
 pub const MENU_QUIT: &str = "quit";
@@ -55,10 +56,17 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         true,
         None::<&str>,
     )?;
+    let set_workspace = MenuItem::with_id(
+        app,
+        MENU_SET_WORKSPACE,
+        i18n::tr(lang, "设置工作区…", "Set Workspace…"),
+        true,
+        None::<&str>,
+    )?;
     // The custom "退出" item is gone: the app menu's standard Quit role
     // covers quitting (with the ⌘Q shortcut), and tearing the server down
     // happens once in lib.rs's ExitRequested handler for every quit path.
-    let file = Submenu::with_items(app, i18n::tr(lang, "文件", "File"), true, &[&open_browser, &restart, &open_data_dir])?;
+    let file = Submenu::with_items(app, i18n::tr(lang, "文件", "File"), true, &[&open_browser, &restart, &set_workspace, &open_data_dir])?;
     // macOS 上 Cmd+C / Cmd+V / Cmd+X / Cmd+A 等快捷键必须由菜单中的标准
     // "编辑"项提供（通过 responder chain 分发到 WebView），缺少它们会导致
     // 剪切/复制/粘贴失效。PredefinedMenuItem 的角色项会自动带上正确的
@@ -118,6 +126,13 @@ pub fn build_tray(
         true,
         None::<&str>,
     )?;
+    let set_workspace = MenuItem::with_id(
+        app,
+        MENU_SET_WORKSPACE,
+        i18n::tr(lang, "设置工作区…", "Set Workspace…"),
+        true,
+        None::<&str>,
+    )?;
     let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
     let autostart = CheckMenuItem::with_id(
         app,
@@ -128,7 +143,7 @@ pub fn build_tray(
         None::<&str>,
     )?;
     let quit = MenuItem::with_id(app, MENU_QUIT, i18n::tr(lang, "退出", "Quit"), true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &open_browser, &restart, &open_data_dir, &autostart, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &open_browser, &restart, &set_workspace, &open_data_dir, &autostart, &quit])?;
 
     // Shared between on_menu_event and on_tray_icon_event below (a left
     // click routes through the same MENU_SHOW_WINDOW id/handler as the

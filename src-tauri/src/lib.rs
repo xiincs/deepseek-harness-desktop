@@ -70,54 +70,106 @@ use server::{DshServer, ServerStatus};
 /// in the close-confirmation dialog and checked "remember". `None` — the
 /// default, and also what a missing/corrupt settings file falls back to —
 /// means "ask every time"; see `WindowEvent::CloseRequested` below.
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 enum CloseAction {
     Minimize,
     Quit,
 }
 
-/// Settings file holding the remembered `CloseAction`, if any — lives
-/// alongside the persistent desktop log (`app_log_dir()`; confirmed to
-/// resolve correctly for both packaged and unpackaged builds, unlike
-/// `app_cache_dir()` — see server.rs's `runtime_dir` doc comment), not
-/// inside `~/.dsh`, which is dsh's own data directory (a different
-/// project's domain — see this crate's module doc).
-fn close_action_settings_path(app: &AppHandle) -> Option<PathBuf> {
-    app.path().app_log_dir().ok().map(|dir| dir.join("close-action.json"))
+/// Everything this shell remembers between launches. `#[serde(default)]` on
+/// both the struct and each field means an older/partial file missing a key
+/// still loads (that key just comes back `None`) rather than failing the
+/// whole parse — adding a setting here never invalidates an existing file.
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct Settings {
+    close_action: Option<CloseAction>,
+    /// Where the dsh server — and so the agent — is rooted by default.
+    /// `None` means the user's home directory (the historical behavior).
+    /// An explicit `DSH_DESKTOP_CWD` env var still wins over this: that's
+    /// the per-launch override (a folder argument from Explorer's "open
+    /// with", or the single-instance relaunch path), and a one-off "open
+    /// this folder" should never silently overwrite what the user chose as
+    /// their standing default.
+    default_workspace: Option<PathBuf>,
 }
 
-/// Reads the remembered close action, if any was ever saved. Any failure
-/// (missing file, unreadable, malformed JSON) is treated the same as "never
-/// saved one" — this is a convenience default, not data worth surfacing an
-/// error over.
-fn load_close_action(app: &AppHandle) -> Option<CloseAction> {
-    let path = close_action_settings_path(app)?;
-    let text = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&text).ok()
+/// Settings file — lives alongside the persistent desktop log
+/// (`app_log_dir()`; confirmed to resolve correctly for both packaged and
+/// unpackaged builds, unlike `app_cache_dir()` — see server.rs's
+/// `runtime_dir` doc comment), not inside `~/.dsh`, which is dsh's own data
+/// directory (a different project's domain — see this crate's module doc).
+fn settings_dir(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_log_dir().ok()
 }
 
-/// Persists the remembered close action for future launches.
-fn save_close_action(app: &AppHandle, action: CloseAction) {
-    let Some(path) = close_action_settings_path(app) else { return };
+fn settings_path(app: &AppHandle) -> Option<PathBuf> {
+    settings_dir(app).map(|dir| dir.join("settings.json"))
+}
+
+/// Reads persisted settings. Any failure (missing file, unreadable,
+/// malformed JSON) is treated the same as "nothing saved yet" — these are
+/// conveniences, not data worth failing startup or surfacing an error over.
+///
+/// Falls back to the pre-`settings.json` `close-action.json` file so a user
+/// who already answered the close dialog (and checked "remember") before
+/// this file existed keeps that answer instead of being asked again. The
+/// fallback only applies when `settings.json` is absent/unreadable — a
+/// readable `settings.json` that simply has no `closeAction` key means the
+/// user never chose one, which is not the same as "the old file has it".
+fn load_settings(app: &AppHandle) -> Settings {
+    match settings_dir(app) {
+        Some(dir) => load_settings_from(&dir),
+        None => Settings::default(),
+    }
+}
+
+/// Path-taking core of [`load_settings`], kept free of `AppHandle` so it can
+/// be tested directly (same split as `panel.rs`'s `file_workspace_options`).
+fn load_settings_from(dir: &std::path::Path) -> Settings {
+    if let Ok(text) = fs::read_to_string(dir.join("settings.json")) {
+        if let Ok(settings) = serde_json::from_str::<Settings>(&text) {
+            return settings;
+        }
+    }
+    match fs::read_to_string(dir.join("close-action.json")) {
+        Ok(text) => Settings { close_action: serde_json::from_str(&text).ok(), ..Settings::default() },
+        Err(_) => Settings::default(),
+    }
+}
+
+/// Persists settings for future launches.
+fn save_settings(app: &AppHandle, settings: &Settings) {
+    let Some(path) = settings_path(app) else { return };
     if let Some(dir) = path.parent() {
         let _ = fs::create_dir_all(dir);
     }
-    if let Ok(text) = serde_json::to_string(&action) {
+    if let Ok(text) = serde_json::to_string(settings) {
         let _ = fs::write(path, text);
     }
 }
 
 pub struct AppState {
     pub server: Arc<Mutex<DshServer>>,
-    /// The remembered answer to "what should the close button do", loaded
-    /// from disk at startup (see `load_close_action`) and updated by the
-    /// `resolve_close_choice` command whenever the user checks "remember".
-    close_action: Mutex<Option<CloseAction>>,
+    /// Persisted preferences, loaded from disk at startup (see
+    /// `load_settings`) and written back by whichever command changes one
+    /// (`resolve_close_choice`, `set_default_workspace`).
+    settings: Mutex<Settings>,
     /// The tray's "开机自动启动" checkbox — kept here so
     /// `MENU_TOGGLE_AUTOSTART` can sync its visual state after toggling
     /// (clicking a `CheckMenuItem` doesn't flip its own display automatically).
     autostart_item: CheckMenuItem<Wry>,
+}
+
+impl AppState {
+    /// The saved default workspace, if any. Exposed for
+    /// `server::workspace_dir`, which own the precedence rules — see its
+    /// doc comment. Cloned out rather than returning the guard so callers
+    /// never hold the settings lock while doing anything else with it.
+    pub fn default_workspace(&self) -> Option<PathBuf> {
+        self.settings.lock().unwrap().default_workspace.clone()
+    }
 }
 
 // ── commands (called only from the local boot page) ─────────────────────────
@@ -125,15 +177,17 @@ pub struct AppState {
 /// Carries out the user's answer to the close-confirmation dialog (shown in
 /// response to the `request-close-choice` event — see
 /// `WindowEvent::CloseRequested`). `remember` persists the choice via
-/// `save_close_action` so future closes this run *and* future launches skip
+/// `save_settings` so future closes this run *and* future launches skip
 /// the dialog entirely and just do it; leaving it unchecked means this
 /// answer covers only the close that's happening right now.
 #[tauri::command]
 fn resolve_close_choice(app: AppHandle, quit: bool, remember: bool) {
     let action = if quit { CloseAction::Quit } else { CloseAction::Minimize };
     if remember {
-        *app.state::<AppState>().close_action.lock().unwrap() = Some(action);
-        save_close_action(&app, action);
+        let state = app.state::<AppState>();
+        let mut settings = state.settings.lock().unwrap();
+        settings.close_action = Some(action);
+        save_settings(&app, &settings);
     }
     match action {
         CloseAction::Minimize => {
@@ -143,6 +197,64 @@ fn resolve_close_choice(app: AppHandle, quit: bool, remember: bool) {
         }
         CloseAction::Quit => app.exit(0),
     }
+}
+
+/// The workspace the server is currently rooted in — what the settings
+/// dialog pre-fills, and what the user is changing. Resolved the same way
+/// `server::workspace_dir` does so the dialog always shows the *effective*
+/// value rather than just the stored preference (which an explicit
+/// `DSH_DESKTOP_CWD` can override for this launch).
+#[tauri::command]
+fn get_default_workspace(app: AppHandle, state: State<'_, AppState>) -> serde_json::Value {
+    let override_active = std::env::var("DSH_DESKTOP_CWD").map(|v| !v.trim().is_empty()).unwrap_or(false);
+    serde_json::json!({
+        "effective": server::workspace_dir(&app).to_string_lossy(),
+        "saved": state.settings.lock().unwrap().default_workspace.as_ref().map(|p| p.to_string_lossy().to_string()),
+        // When set, the env var wins over the saved value for this launch —
+        // the dialog says so, instead of appearing to contradict what it shows.
+        "overrideActive": override_active,
+    })
+}
+
+/// Sets (or with `null`, clears) the standing default workspace and restarts
+/// the server so it takes effect immediately. `None` restores the historical
+/// "user's home directory" behavior.
+///
+/// Rejects a path that isn't an existing directory: the value is persisted
+/// and applied to every future launch, so silently storing a typo would look
+/// like the setting simply not working, with nothing pointing at why.
+#[tauri::command]
+fn set_default_workspace(app: AppHandle, path: Option<String>) -> Result<(), String> {
+    let lang = i18n::detect();
+    let workspace = match path.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()) {
+        Some(p) => {
+            let pb = PathBuf::from(&p);
+            if !pb.is_dir() {
+                return Err(if lang == i18n::Lang::En {
+                    format!("Not a directory, or it can't be read: {p}")
+                } else {
+                    format!("目录不存在或无法访问: {p}")
+                });
+            }
+            Some(pb)
+        }
+        None => None,
+    };
+    {
+        let state = app.state::<AppState>();
+        let mut settings = state.settings.lock().unwrap();
+        settings.default_workspace = workspace;
+        save_settings(&app, &settings);
+    }
+    // The env var would otherwise keep shadowing the value just saved (see
+    // `Settings::default_workspace`'s precedence note) — clearing it here is
+    // what makes "set a new default" actually take effect for this run too,
+    // rather than only after the next launch.
+    std::env::remove_var("DSH_DESKTOP_CWD");
+    let srv = app.state::<AppState>().server.clone();
+    let app2 = app.clone();
+    thread::spawn(move || server::restart(&app2, &srv));
+    Ok(())
 }
 
 #[tauri::command]
@@ -918,6 +1030,14 @@ fn handle_menu_action(app: &AppHandle, id: &str) {
             let _ = std::fs::create_dir_all(&home);
             let _ = app.opener().reveal_item_in_dir(&home);
         }
+        menu::MENU_SET_WORKSPACE => {
+            // Reachable from the tray while the window is hidden, so surface
+            // the window first — the dialog this opens lives in the shell
+            // page, and an event sent to a hidden window would just sit
+            // there unread.
+            show_main_window(app);
+            let _ = app.emit("request-set-workspace", ());
+        }
         menu::MENU_SHOW_WINDOW => show_main_window(app),
         menu::MENU_TOGGLE_AUTOSTART => {
             let autolaunch = app.autolaunch();
@@ -1094,6 +1214,8 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             resolve_close_choice,
+            get_default_workspace,
+            set_default_workspace,
             get_status,
             get_info,
             start_server,
@@ -1147,7 +1269,7 @@ pub fn run() {
             // the panic hook above already closed over, created before this
             // closure so both share one server rather than racing to set up
             // two independent ones.
-            let close_action = Mutex::new(load_close_action(&handle));
+            let settings = Mutex::new(load_settings(&handle));
 
             // WebView2-level settings for the *shell* webview (which draws the
             // toolbar, boot/error states, dock, and overlays). They hold for
@@ -1248,7 +1370,7 @@ pub fn run() {
 
             app.manage(AppState {
                 server: srv.clone(),
-                close_action,
+                settings,
                 autostart_item,
             });
             app.manage(terminal::TerminalState::default());
@@ -1267,7 +1389,7 @@ pub fn run() {
                 // never by letting this proceed unprompted.
                 api.prevent_close();
                 let app = window.app_handle();
-                let remembered = *app.state::<AppState>().close_action.lock().unwrap();
+                let remembered = app.state::<AppState>().settings.lock().unwrap().close_action;
                 match remembered {
                     Some(CloseAction::Minimize) => {
                         let _ = window.hide();
@@ -1311,7 +1433,9 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::requested_workspace;
+    use super::{load_settings_from, requested_workspace, CloseAction, Settings};
+    use std::fs;
+    use std::path::PathBuf;
 
     #[test]
     fn finds_first_existing_dir_after_the_exe_path() {
@@ -1344,5 +1468,87 @@ mod tests {
         let fake_exe = tmp.join("dsh-desktop.exe");
         let args = vec![fake_exe.display().to_string()];
         assert_eq!(requested_workspace(&args), None);
+    }
+
+    // ── settings persistence ──
+
+    /// Unique per-test scratch directory, cleaned up on the way in (a
+    /// previous failed run may have left one behind). Same pattern as
+    /// `panel.rs`'s tests.
+    fn scratch_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("dsh-desktop-settings-test-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn settings_load_default_when_nothing_was_ever_saved() {
+        let dir = scratch_dir("empty");
+        let settings = load_settings_from(&dir);
+        assert!(settings.close_action.is_none());
+        assert!(settings.default_workspace.is_none());
+    }
+
+    #[test]
+    fn settings_round_trip_through_the_new_file() {
+        let dir = scratch_dir("roundtrip");
+        let saved = Settings {
+            close_action: Some(CloseAction::Quit),
+            default_workspace: Some(PathBuf::from(r"C:\projects\thing")),
+        };
+        fs::write(dir.join("settings.json"), serde_json::to_string(&saved).unwrap()).unwrap();
+
+        let loaded = load_settings_from(&dir);
+        assert_eq!(loaded.close_action, Some(CloseAction::Quit));
+        assert_eq!(loaded.default_workspace, Some(PathBuf::from(r"C:\projects\thing")));
+    }
+
+    #[test]
+    fn settings_fall_back_to_the_legacy_close_action_file() {
+        // A user who answered the close dialog before settings.json existed
+        // must keep that answer rather than being asked all over again.
+        let dir = scratch_dir("legacy");
+        fs::write(dir.join("close-action.json"), r#""minimize""#).unwrap();
+
+        let loaded = load_settings_from(&dir);
+        assert_eq!(loaded.close_action, Some(CloseAction::Minimize));
+        assert!(loaded.default_workspace.is_none());
+    }
+
+    #[test]
+    fn settings_prefer_the_new_file_over_the_legacy_one() {
+        // Both present: settings.json is the current source of truth, and a
+        // missing closeAction key in it means "never chose one" — not "fall
+        // back to the stale legacy file".
+        let dir = scratch_dir("prefer-new");
+        fs::write(dir.join("close-action.json"), r#""minimize""#).unwrap();
+        fs::write(dir.join("settings.json"), r#"{"defaultWorkspace":"C:\\projects\\thing"}"#).unwrap();
+
+        let loaded = load_settings_from(&dir);
+        assert!(loaded.close_action.is_none());
+        assert_eq!(loaded.default_workspace, Some(PathBuf::from(r"C:\projects\thing")));
+    }
+
+    #[test]
+    fn settings_survive_a_malformed_file_instead_of_failing_startup() {
+        let dir = scratch_dir("malformed");
+        fs::write(dir.join("settings.json"), "{ this is not json").unwrap();
+
+        // Falls through to "nothing saved" rather than panicking or erroring.
+        let loaded = load_settings_from(&dir);
+        assert!(loaded.close_action.is_none() && loaded.default_workspace.is_none());
+    }
+
+    #[test]
+    fn settings_tolerate_a_file_missing_newer_keys() {
+        // A settings.json written by an older build (before a key existed)
+        // must still load the keys it does have.
+        let dir = scratch_dir("partial");
+        fs::write(dir.join("settings.json"), r#"{"closeAction":"quit"}"#).unwrap();
+
+        let loaded = load_settings_from(&dir);
+        assert_eq!(loaded.close_action, Some(CloseAction::Quit));
+        assert!(loaded.default_workspace.is_none());
     }
 }

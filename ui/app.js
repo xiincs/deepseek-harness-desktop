@@ -108,6 +108,16 @@ const els = {
   closeChoiceRemember: document.getElementById("close-choice-remember"),
   btnCloseChoiceMinimize: document.getElementById("btn-close-choice-minimize"),
   btnCloseChoiceQuit: document.getElementById("btn-close-choice-quit"),
+  workspaceDialogOverlay: document.getElementById("workspace-dialog-overlay"),
+  workspaceDialogCurrent: document.getElementById("workspace-dialog-current"),
+  workspaceDialogOverride: document.getElementById("workspace-dialog-override"),
+  workspaceDialogKnown: document.getElementById("workspace-dialog-known"),
+  workspaceDialogKnownList: document.getElementById("workspace-dialog-known-list"),
+  workspaceDialogInput: document.getElementById("workspace-dialog-input"),
+  workspaceDialogError: document.getElementById("workspace-dialog-error"),
+  btnWorkspaceCancel: document.getElementById("btn-workspace-cancel"),
+  btnWorkspaceReset: document.getElementById("btn-workspace-reset"),
+  btnWorkspaceSave: document.getElementById("btn-workspace-save"),
 };
 
 // ── i18n ─────────────────────────────────────────────────────────────────
@@ -161,6 +171,13 @@ const STRINGS = {
     closeChoiceRemember: "记住我的选择，以后不再询问",
     closeChoiceMinimize: "最小化到托盘",
     closeChoiceQuit: "退出",
+    setWorkspaceTitle: "设置工作区",
+    setWorkspaceCurrent: (path) => `当前工作区：${path}`,
+    setWorkspaceOverrideActive:
+      "注意：本次启动由命令行参数或 DSH_DESKTOP_CWD 指定了工作区，它会覆盖下面的设置（下次正常启动时恢复生效）。",
+    setWorkspaceKnown: "选择已有工作区：",
+    setWorkspacePlaceholder: "或输入自定义目录路径",
+    setWorkspaceReset: "恢复默认（用户主目录）",
     startupFailed: "启动失败",
     retry: "重试",
     refreshTreeTitle: "刷新文件树与 Git 状态",
@@ -292,6 +309,13 @@ const STRINGS = {
     closeChoiceRemember: "Remember my choice, don't ask again",
     closeChoiceMinimize: "Minimize to Tray",
     closeChoiceQuit: "Quit",
+    setWorkspaceTitle: "Set Workspace",
+    setWorkspaceCurrent: (path) => `Current workspace: ${path}`,
+    setWorkspaceOverrideActive:
+      "Note: this launch specified a workspace via a command-line argument or DSH_DESKTOP_CWD, which overrides the setting below (it takes effect again on a normal launch).",
+    setWorkspaceKnown: "Pick an existing workspace:",
+    setWorkspacePlaceholder: "Or type a folder path",
+    setWorkspaceReset: "Reset to default (home folder)",
     startupFailed: "Startup Failed",
     retry: "Retry",
     refreshTreeTitle: "Refresh file tree and Git status",
@@ -2388,6 +2412,85 @@ async function showPromptDialog(message, defaultValue, confirmLabel) {
   return trimmed === "" ? null : trimmed;
 }
 
+// ── workspace settings dialog ──
+//
+// Where the dsh server is rooted, and so where the agent works. Its own
+// dialog rather than an openDialog() shape: it needs a live-resolved
+// "current" line, an optional override warning, and a list of existing
+// workspaces to pick from — none of which fit that helper's
+// message/confirm/cancel model.
+
+async function openWorkspaceDialog() {
+  els.workspaceDialogInput.value = "";
+  els.workspaceDialogError.classList.add("hidden");
+  els.workspaceDialogKnown.classList.add("hidden");
+  els.workspaceDialogKnownList.replaceChildren();
+  els.workspaceDialogOverlay.classList.remove("hidden");
+  els.workspaceDialogInput.focus();
+
+  // The dialog must still work as plain path entry if this fails, so a
+  // failure leaves the static markup (title/buttons/placeholder) alone
+  // rather than blocking the open.
+  let info = null;
+  try {
+    info = await invoke("get_default_workspace");
+  } catch {
+    /* falls through */
+  }
+  if (info) {
+    els.workspaceDialogCurrent.textContent = t("setWorkspaceCurrent", info.effective);
+    els.workspaceDialogOverride.classList.toggle("hidden", !info.overrideActive);
+    els.workspaceDialogInput.value = info.saved ?? "";
+  }
+
+  let known = [];
+  try {
+    known = await invoke("get_known_workspaces");
+  } catch {
+    /* falls through with an empty list; the input still works alone */
+  }
+  if (!Array.isArray(known) || known.length === 0) return;
+  for (const ws of known) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "workspace-known-item";
+    // Clicking fills the input instead of saving straight away: the picker
+    // is a shortcut for typing a path, not a second way to commit one.
+    item.addEventListener("click", () => {
+      els.workspaceDialogInput.value = ws.path;
+      els.workspaceDialogInput.focus();
+    });
+    const title = document.createElement("span");
+    title.textContent = ws.title;
+    const path = document.createElement("span");
+    path.className = "workspace-known-path";
+    path.textContent = ws.path;
+    item.append(title, path);
+    els.workspaceDialogKnownList.appendChild(item);
+  }
+  els.workspaceDialogKnown.classList.remove("hidden");
+}
+
+// `path` null means "reset to the default (home folder)". On success the
+// dialog just closes — the restart it triggers shows up on the boot page by
+// itself, which is clearer than a message that would immediately be covered
+// by it.
+async function saveWorkspaceDialog(path) {
+  els.workspaceDialogError.classList.add("hidden");
+  els.btnWorkspaceSave.disabled = true;
+  els.btnWorkspaceReset.disabled = true;
+  try {
+    await invoke("set_default_workspace", { path });
+    els.workspaceDialogOverlay.classList.add("hidden");
+  } catch (err) {
+    els.workspaceDialogError.textContent = err;
+    els.workspaceDialogError.classList.remove("hidden");
+  } finally {
+    els.btnWorkspaceSave.disabled = false;
+    els.btnWorkspaceReset.disabled = false;
+  }
+}
+
 // True if it's safe to proceed with whatever's about to replace or close
 // the current preview: nothing open, nothing unsaved, or the user
 // explicitly confirmed discarding it. Never mutates state itself — the
@@ -3117,6 +3220,11 @@ async function init() {
     els.closeChoiceOverlay.classList.add("hidden");
     invoke("resolve_close_choice", { quit: true, remember: els.closeChoiceRemember.checked });
   });
+  // Fired by the "设置工作区…" menu action (lib.rs's handle_menu_action).
+  listen("request-set-workspace", () => openWorkspaceDialog());
+  els.btnWorkspaceCancel.addEventListener("click", () => els.workspaceDialogOverlay.classList.add("hidden"));
+  els.btnWorkspaceSave.addEventListener("click", () => saveWorkspaceDialog(els.workspaceDialogInput.value));
+  els.btnWorkspaceReset.addEventListener("click", () => saveWorkspaceDialog(null));
   els.btnRetry.addEventListener("click", () => {
     els.btnRetry.disabled = true;
     invoke("start_server")

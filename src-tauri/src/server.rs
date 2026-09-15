@@ -1296,12 +1296,28 @@ pub fn set_stopped(app: &AppHandle, server: &Shared) {
 }
 
 /// The workspace directory the server — and this shell's own
-/// workspace-aware features (the file/git panel in `panel.rs`) — operate on:
-/// `DSH_DESKTOP_CWD` if set, else the user's home directory.
+/// workspace-aware features (the file/git panel in `panel.rs`) — operate on.
+/// Precedence, highest first:
+///
+/// 1. `DSH_DESKTOP_CWD` — the per-launch override. Set from a folder
+///    argument (Explorer's "open with", a drag onto the exe) or by the
+///    single-instance relaunch path. An explicit "open *this* folder" should
+///    win for that launch without rewriting the user's standing default.
+/// 2. The workspace saved via the settings dialog (`set_default_workspace`),
+///    read from the same `Settings` the rest of the shell persists.
+/// 3. The user's home directory — the historical behavior, still the answer
+///    when nothing has ever been configured.
 pub(crate) fn workspace_dir(app: &AppHandle) -> PathBuf {
-    env_nonempty("DSH_DESKTOP_CWD")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| resolve_home(app))
+    if let Some(dir) = env_nonempty("DSH_DESKTOP_CWD") {
+        return PathBuf::from(dir);
+    }
+    if let Some(saved) = app
+        .try_state::<crate::AppState>()
+        .and_then(|state| state.default_workspace())
+    {
+        return saved;
+    }
+    resolve_home(app)
 }
 
 /// Spawn the server process and start its reader/exit-watcher threads.

@@ -1311,6 +1311,139 @@ body.platform-decorated #toolbar-actions {
   gap: 8px;
 }
 
+/* ── workspace settings dialog ── */
+
+#workspace-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+#workspace-dialog-overlay.hidden {
+  display: none;
+}
+
+#workspace-dialog {
+  width: min(460px, 100%);
+  max-height: 80vh;
+  overflow-y: auto;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+  padding: 20px;
+  animation: boot-card-enter 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+#workspace-dialog-title {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* Full paths are long and users compare them character by character —
+   monospace plus wrapping beats an ellipsis here. */
+#workspace-dialog-current {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+#workspace-dialog-override {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--danger);
+}
+
+#workspace-dialog-override.hidden {
+  display: none;
+}
+
+#workspace-dialog-known.hidden {
+  display: none;
+}
+
+#workspace-dialog-known-label {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+#workspace-dialog-known-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 12px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.workspace-known-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: var(--sidebar-bg);
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.workspace-known-item:hover {
+  border-color: var(--accent);
+}
+
+.workspace-known-path {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+#workspace-dialog-input {
+  display: block;
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 7px 10px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: var(--sidebar-bg);
+  color: var(--text);
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#workspace-dialog-error {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+#workspace-dialog-error.hidden {
+  display: none;
+}
+
+#workspace-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* ── resize handle: draggable, persisted dock-vs-content split ── */
 
 /* A real 8px-wide flex item (not a thin line widened via a negative-margin
