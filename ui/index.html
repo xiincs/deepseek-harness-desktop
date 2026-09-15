@@ -569,6 +569,39 @@
       </div>
     </div>
     <!--
+      Workspace settings (see the set_workspace menu action in lib.rs, which
+      emits "request-set-workspace"). The server is spawned with a cwd, so
+      changing this restarts it — the dialog says so rather than letting the
+      harness appear to reload for no reason.
+    -->
+    <div id="workspace-dialog-overlay" class="hidden">
+      <div id="workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="workspace-dialog-title">
+        <h2 id="workspace-dialog-title" data-i18n="setWorkspaceTitle"></h2>
+        <p id="workspace-dialog-current"></p>
+        <p id="workspace-dialog-override" class="hidden" data-i18n="setWorkspaceOverrideActive"></p>
+        <!-- Populated on open from get_known_workspaces — clicking a row
+             fills the input below rather than saving immediately, so the
+             user can still adjust before committing. -->
+        <div id="workspace-dialog-known" class="hidden">
+          <p id="workspace-dialog-known-label" data-i18n="setWorkspaceKnown"></p>
+          <div id="workspace-dialog-known-list"></div>
+        </div>
+        <input
+          id="workspace-dialog-input"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          data-i18n-placeholder="setWorkspacePlaceholder"
+        />
+        <p id="workspace-dialog-error" class="hidden"></p>
+        <div id="workspace-dialog-actions" class="actions">
+          <button id="btn-workspace-cancel" data-i18n="cancel"></button>
+          <button id="btn-workspace-reset" data-i18n="setWorkspaceReset"></button>
+          <button id="btn-workspace-save" class="primary" data-i18n="save"></button>
+        </div>
+      </div>
+    </div>
+    <!--
       File tree right-click menu (see openTreeContextMenu in app.js) — built
       fresh into this one empty container on every right-click rather than a
       static template, since which items show up depends on what was
