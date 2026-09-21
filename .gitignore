@@ -26,3 +26,8 @@ docs/TODO.md
 Thumbs.db
 .idea/
 .vscode/
+
+# Local agent tooling state (Claude Code worktrees/logs, nezha) — machine-local,
+# can be many GB, never meant for the repo.
+.claude/
+.nezha/

@@ -1,19 +1,22 @@
-//! Workspace file tree and git status — powers the native side panel that
-//! sits beside the embedded harness `<iframe>` in `ui/`. Independent of dsh:
-//! reads the workspace directory directly and shells out to the user's own
-//! `git`, the same pattern `server.rs` already uses for `node`/`npm`.
+//! Workspace git status, file reads/writes, and workspace-root resolution —
+//! powers the native dock in `ui/`. Independent of dsh: reads the workspace
+//! directory directly and shells out to the user's own `git`, the same
+//! pattern `server.rs` already uses for `node`/`npm`.
 //!
-//! There is no dsh-side HTTP API for either of these (confirmed against the
-//! upstream harness's own `/api` gateway, which exposes no filesystem or git
-//! surface) — the upstream project's own design notes place an in-app file
-//! preview "in the desktop shell's own design, not [the harness's]", so this
-//! module owns both independently rather than proxying anything dsh-side.
+//! There is no dsh-side HTTP API for the git surface (confirmed against the
+//! upstream harness's own `/api` gateway, which exposes none), so this module
+//! owns it independently rather than proxying anything dsh-side. The *file
+//! tree* that used to live here is gone: dsh's own right-hand Sidebar draws
+//! one now (`@deepseek-ai/dsh-client-ui-sidebar-files`), and two trees over
+//! the same workspace disagreeing about the root was worse than either alone.
+//! What remains of the file half is the read/save/edit path behind the dock's
+//! preview card, plus the mutations (`create_file`/`rename_entry`/…) the
+//! shell keeps registered but no longer has a UI for.
 //!
 //! It does read one piece of dsh's own state directly off disk, though: see
 //! `active_workspace_dir` below for why `DSH_DESKTOP_CWD` alone isn't enough
-//! to know what workspace the panel should show.
+//! to know what workspace the dock should show.
 
-use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -21,156 +24,6 @@ use std::process::Command;
 use base64::Engine as _;
 use serde::Serialize;
 use tauri_plugin_opener::OpenerExt;
-
-/// Directory names never shown in the tree, regardless of workspace — `.git`
-/// is never useful to browse here, and `node_modules`/`target` are the two
-/// dependency/build directories common enough across arbitrary user
-/// workspaces to be worth a hardcoded skip rather than requiring the user to
-/// collapse them by hand every time. Deliberately not gitignore-aware (real
-/// pattern matching, negation, and nested `.gitignore` files are a
-/// meaningfully bigger scope than this first slice) — a workspace with other
-/// large ignored directories still renders them today.
-const IGNORED_DIR_NAMES: &[&str] = &[".git", "node_modules", "target"];
-/// Caps a pathological workspace (a huge monorepo, or one of the ignored
-/// names above not applying) from blocking the UI thread on a multi-second
-/// directory walk. Higher than it originally was now that list_workspace_tree
-/// spends this budget breadth-first (every already-discovered directory gets
-/// a fair turn before the budget starts going toward anyone's
-/// grandchildren) — a low cap mattered a lot more when one big subtree could
-/// silently absorb the whole thing depth-first.
-const MAX_ENTRIES: usize = 20_000;
-const MAX_DEPTH: usize = 12;
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct TreeEntry {
-    pub name: String,
-    /// Relative to the workspace root, `/`-separated regardless of platform
-    /// (matches `GitEntry::path` below, so the client can join tree entries
-    /// against git status by exact string equality).
-    pub path: String,
-    pub is_dir: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub children: Option<Vec<TreeEntry>>,
-}
-
-/// One directory still waiting for its own immediate children to be listed
-/// — `indices` is the path down through `list_workspace_tree`'s `out` (and
-/// each ancestor's own `children`) to reach that directory's `TreeEntry`.
-struct PendingDir {
-    indices: Vec<usize>,
-    full_path: PathBuf,
-    depth: usize,
-}
-
-pub fn list_workspace_tree(root: &Path) -> Vec<TreeEntry> {
-    let mut budget = MAX_ENTRIES;
-    list_workspace_tree_with_budget(root, &mut budget)
-}
-
-/// Breadth-first, not depth-first — this is the second attempt at this
-/// function, and the difference from the first matters. The first version
-/// recursed into each subdirectory immediately (depth-first): a large/deep
-/// early branch could exhaust the *entire shared budget* before its own
-/// unrelated siblings were even listed. That was fixed by listing a
-/// directory's own entries before recursing into any of them (see
-/// list_dir_shallow) — but that fix only made each *individual* directory
-/// fair against its own children. The same starvation pattern still
-/// recurred one level deeper: a huge subdirectory could still exhaust the
-/// budget before a *sibling* two levels down ever got its own turn, at any
-/// depth, not just the root. Reported twice now (root-level, then again for
-/// folders one level in) — breadth-first actually closes this: every
-/// directory at depth N gets its own immediate children listed before *any*
-/// directory at depth N+1 does, so the budget can only ever run out
-/// "fairly", after giving every already-discovered directory an equal turn
-/// first. Takes `budget` as a parameter (list_workspace_tree above supplies
-/// MAX_ENTRIES) so a test can exhaust a tiny budget without needing to
-/// create thousands of real files.
-fn list_workspace_tree_with_budget(root: &Path, budget: &mut usize) -> Vec<TreeEntry> {
-    let mut out = list_dir_shallow(root, root, budget);
-
-    let mut queue: VecDeque<PendingDir> = VecDeque::new();
-    for (i, entry) in out.iter().enumerate() {
-        if entry.is_dir {
-            queue.push_back(PendingDir { indices: vec![i], full_path: root.join(&entry.name), depth: 1 });
-        }
-    }
-    while let Some(pending) = queue.pop_front() {
-        if pending.depth > MAX_DEPTH || *budget == 0 {
-            continue;
-        }
-        let children = list_dir_shallow(root, &pending.full_path, budget);
-        for (i, child) in children.iter().enumerate() {
-            if child.is_dir {
-                let mut indices = pending.indices.clone();
-                indices.push(i);
-                queue.push_back(PendingDir { indices, full_path: pending.full_path.join(&child.name), depth: pending.depth + 1 });
-            }
-        }
-        node_at_mut(&mut out, &pending.indices).children = Some(children);
-    }
-    out
-}
-
-/// Walks `indices` down through `entries` and each ancestor's own
-/// `children` to reach one specific `TreeEntry`. Every index path this is
-/// ever called with comes from a `PendingDir` the BFS loop above enqueued
-/// while processing that entry's *parent* — by the time this entry's own
-/// turn comes up (queue order preserves discovery order), the parent's
-/// `children` has already been assigned `Some(...)` in an earlier iteration
-/// of that same loop, which is what the `expect` below is relying on.
-fn node_at_mut<'a>(entries: &'a mut [TreeEntry], indices: &[usize]) -> &'a mut TreeEntry {
-    let (&first, rest) = indices.split_first().expect("indices is never empty");
-    let entry = &mut entries[first];
-    if rest.is_empty() {
-        entry
-    } else {
-        node_at_mut(entry.children.as_mut().expect("parent's own children were already assigned before this child was enqueued"), rest)
-    }
-}
-
-/// Lists just `dir`'s own immediate entries — no recursion, unlike the
-/// function this replaced. Every directory in the result starts with
-/// `children: Some(vec![])`, a placeholder `list_workspace_tree`'s BFS loop
-/// either fills in later or leaves as-is (for whichever directories the
-/// shared budget didn't reach) — same "still renders as an expandable, if
-/// empty-looking, folder rather than silently looking like a leaf" reason
-/// the very first version of this budget scheme already established.
-fn list_dir_shallow(root: &Path, dir: &Path, budget: &mut usize) -> Vec<TreeEntry> {
-    if *budget == 0 {
-        return Vec::new();
-    }
-    let Ok(read_dir) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut entries: Vec<_> = read_dir.filter_map(Result::ok).collect();
-    // Directories first, then alphabetical within each group — stable,
-    // predictable order for a tree UI (matches how most file browsers sort).
-    entries.sort_by(|a, b| {
-        let a_is_dir = a.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        let b_is_dir = b.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        b_is_dir.cmp(&a_is_dir).then_with(|| a.file_name().cmp(&b.file_name()))
-    });
-
-    let mut out = Vec::new();
-    for entry in entries {
-        if *budget == 0 {
-            break;
-        }
-        let Ok(file_type) = entry.file_type() else { continue };
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let is_dir = file_type.is_dir();
-        if is_dir && IGNORED_DIR_NAMES.contains(&name.as_str()) {
-            continue;
-        }
-        let full_path = entry.path();
-        let Ok(rel) = full_path.strip_prefix(root) else { continue };
-        let path = rel.to_string_lossy().replace('\\', "/");
-        *budget -= 1;
-        out.push(TreeEntry { name, path, is_dir, children: is_dir.then(Vec::new) });
-    }
-    out
-}
 
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -959,96 +812,6 @@ mod tests {
         assert_eq!(find("keep.txt"), Some(GitStatus::Modified));
         assert_eq!(find("gone.txt"), Some(GitStatus::Deleted));
         assert_eq!(find("new.txt"), Some(GitStatus::Untracked));
-
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn git_status_on_a_non_git_directory_is_empty_not_an_error() {
-        let dir = scratch_dir("nogit");
-        assert!(git_status(&dir).is_empty());
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn tree_skips_ignored_dir_names_and_sorts_directories_before_files() {
-        let dir = scratch_dir("tree");
-        fs::create_dir_all(dir.join("node_modules")).unwrap();
-        fs::create_dir_all(dir.join("src")).unwrap();
-        fs::write(dir.join("a.txt"), "").unwrap();
-        fs::write(dir.join("src").join("main.rs"), "").unwrap();
-
-        let tree = list_workspace_tree(&dir);
-        let names: Vec<_> = tree.iter().map(|e| e.name.as_str()).collect();
-
-        assert!(!names.contains(&"node_modules"));
-        assert_eq!(names, vec!["src", "a.txt"]);
-        assert_eq!(tree[0].path, "src");
-        assert_eq!(tree[0].children.as_ref().unwrap()[0].path, "src/main.rs");
-
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn tree_lists_every_root_entry_even_when_an_earlier_ones_subtree_exhausts_the_budget() {
-        // Regression test for a reported bug: a large/deep subtree under an
-        // alphabetically-earlier root entry used to consume the *entire*
-        // shared budget depth-first before its own root-level siblings were
-        // even listed — not just before their children were fetched, they
-        // never got a TreeEntry at all. Calls list_workspace_tree_with_budget
-        // directly with a tiny budget instead of creating thousands of files
-        // to exhaust the real MAX_ENTRIES.
-        let dir = scratch_dir("tree-budget");
-        fs::create_dir_all(dir.join("aaa")).unwrap();
-        for i in 1..=5 {
-            fs::write(dir.join("aaa").join(format!("f{i}.txt")), "").unwrap();
-        }
-        fs::create_dir_all(dir.join("bbb")).unwrap();
-        fs::write(dir.join("bbb").join("g.txt"), "").unwrap();
-
-        let mut budget = 3;
-        let tree = list_workspace_tree_with_budget(&dir, &mut budget);
-        let names: Vec<_> = tree.iter().map(|e| e.name.as_str()).collect();
-
-        assert_eq!(names, vec!["aaa", "bbb"], "bbb must still be listed even though aaa's subtree used up the rest of the budget");
-        assert!(!tree[0].children.as_ref().unwrap().is_empty(), "aaa should still get whatever budget remained after both root entries were listed");
-
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn tree_lists_a_sibling_directorys_own_children_even_when_an_earlier_siblings_subtree_is_deep() {
-        // Distinguishes true breadth-first from the first fix above, which
-        // only made each *individual* directory's own listing fair against
-        // its own children — not the whole tree fair against itself. aaa's
-        // own subtree here goes three levels deep, deep enough that a
-        // depth-first walk exhausts the whole budget completing it before
-        // ever returning to list bbb/ccc's own, much shallower files —
-        // reproducing the reported "only the first few folders show their
-        // contents when expanded, later ones show nothing" one level below
-        // the root, exactly where the first fix's root-level-only fairness
-        // didn't reach.
-        let dir = scratch_dir("tree-budget-deep-sibling");
-        fs::create_dir_all(dir.join("parent").join("aaa").join("sub").join("subsub")).unwrap();
-        fs::write(dir.join("parent").join("aaa").join("x1.txt"), "").unwrap();
-        fs::write(dir.join("parent").join("aaa").join("sub").join("x2.txt"), "").unwrap();
-        fs::write(dir.join("parent").join("aaa").join("sub").join("subsub").join("x3.txt"), "").unwrap();
-        fs::create_dir_all(dir.join("parent").join("bbb")).unwrap();
-        fs::write(dir.join("parent").join("bbb").join("g.txt"), "").unwrap();
-        fs::create_dir_all(dir.join("parent").join("ccc")).unwrap();
-        fs::write(dir.join("parent").join("ccc").join("h.txt"), "").unwrap();
-
-        // root(1) + parent's own [aaa,bbb,ccc](3) + aaa's own [sub,x1.txt](2)
-        // + sub's own [subsub,x2.txt](2) + subsub's own [x3.txt](1) = 9,
-        // exactly enough for a depth-first walk to fully exhaust aaa's own
-        // subtree before parent's loop ever reaches bbb.
-        let mut budget = 9;
-        let tree = list_workspace_tree_with_budget(&dir, &mut budget);
-
-        let parent = tree.iter().find(|e| e.name == "parent").unwrap();
-        let bbb = parent.children.as_ref().unwrap().iter().find(|e| e.name == "bbb").unwrap();
-        let bbb_names: Vec<_> = bbb.children.as_ref().unwrap().iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(bbb_names, vec!["g.txt"], "bbb's own file must be listed even though aaa's own subtree goes several levels deeper");
 
         let _ = fs::remove_dir_all(&dir);
     }

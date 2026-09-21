@@ -190,11 +190,17 @@ fn resolve_close_choice(app: AppHandle, quit: bool, remember: bool) {
         save_settings(&app, &settings);
     }
     match action {
-        CloseAction::Minimize => {
-            if let Some(win) = app.get_webview_window("main") {
-                let _ = win.hide();
+        CloseAction::Minimize => match main_window(&app) {
+            Some(win) => {
+                if let Err(e) = win.hide() {
+                    eprintln!("[dsh-desktop] resolve_close_choice: hide() failed: {e}");
+                }
             }
-        }
+            // Worth a line rather than `let _`: with no window handle this
+            // branch has nothing to do, and the user-visible result is a
+            // close dialog button that appears dead. See `main_window`.
+            None => eprintln!("[dsh-desktop] resolve_close_choice: no window labeled \"main\""),
+        },
         CloseAction::Quit => app.exit(0),
     }
 }
@@ -292,19 +298,12 @@ fn stop_server(app: AppHandle, state: State<'_, AppState>) -> Result<(), String>
 
 /// `override_path`: the client's manual-picker choice, when it has one —
 /// see the "known workspaces" section in `panel.rs`. `None`/absent falls
-/// back to auto-inference, same as before that picker existed.
-#[tauri::command]
-fn get_workspace_tree(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    override_path: Option<String>,
-) -> Vec<panel::TreeEntry> {
-    let root = override_path
-        .map(PathBuf::from)
-        .unwrap_or_else(|| panel::effective_workspace_dir(&app, &state.server));
-    panel::list_workspace_tree(&root)
-}
-
+/// back to auto-inference. The picker itself is gone (it lived in the tree
+/// this shell no longer draws, see `get_known_workspaces` below), so the
+/// client always omits this today; the parameter stays because dropping it
+/// from one command in this family and not the others would be a worse
+/// shape than an unused `None`, and a future caller with a workspace in
+/// hand (a per-workspace action, say) is the obvious reason to keep it.
 #[tauri::command]
 fn get_git_status(
     app: AppHandle,
@@ -317,28 +316,22 @@ fn get_git_status(
     panel::git_status(&root)
 }
 
-/// The panel's workspace-name label when in auto mode. Re-resolved on every
-/// panel refresh (not cached at startup like `get_info`'s other fields)
-/// since the harness's own in-page workspace selection — entirely inside
-/// the harness webview, with no signal reaching this shell directly — can change
-/// independently of anything else this shell observes. See
-/// `panel::active_workspace_dir`. Not called at all once the client has a
-/// manual-picker choice locked in — it already knows what to show.
-#[tauri::command]
-fn get_active_workspace(app: AppHandle, state: State<'_, AppState>) -> String {
-    panel::effective_workspace_dir(&app, &state.server).to_string_lossy().into_owned()
-}
-
-/// Every workspace dsh currently knows about — populates the panel's manual
-/// picker. See the "known workspaces" section in `panel.rs`.
+/// Every workspace dsh currently knows about. Two callers, both in
+/// `ui/app.js`: the "设置工作区…" dialog's list of existing workspaces, and
+/// the harness→shell file-mention bridge, which has to turn the absolute
+/// path it receives back into the workspace-relative one
+/// `get_editable_preview` takes. (It used to populate the panel's manual
+/// workspace picker as well; both that picker and the tree it hung off are
+/// gone — dsh's own right-hand Sidebar draws the workspace tree now.)
 #[tauri::command]
 fn get_known_workspaces(app: AppHandle, state: State<'_, AppState>) -> Vec<panel::WorkspaceOption> {
     panel::known_workspaces(&app, &state.server)
 }
 
-/// `path`: workspace-relative, as returned in a `TreeEntry`/`GitEntry`'s own
-/// `path` field — the client passes through whichever tree row it clicked.
-/// `override_path`: same manual-picker override as `get_workspace_tree`.
+/// `path`: workspace-relative — a `GitEntry`'s own `path` from
+/// `get_git_status`, or (via the file-mention bridge) an absolute path the
+/// client has already made relative against its workspace root.
+/// `override_path`: same manual-picker override as `get_git_status`.
 /// Returns both the current and (when there's a prior committed version
 /// worth comparing against) `HEAD` content — `ui/app.js` hands both straight
 /// to CodeMirror's `unifiedMergeView`, which does the actual diffing.
@@ -369,9 +362,19 @@ fn save_file_content(
     panel::save_file(&root, &path, &content)
 }
 
-// ── tree context menu: file/folder operations ────────────────────────────
+// ── file/folder operations ───────────────────────────────────────────────
+//
 // Same override_path resolution as every command above — the manual
 // workspace picker's choice when there is one, auto-inference otherwise.
+//
+// ⚠️ Nothing in `ui/app.js` calls these any more. They were the file tree's
+// right-click menu (new file / new folder / rename / delete / copy path /
+// reveal / open with), and the tree is gone — dsh's own Sidebar draws one
+// now, and it exposes no extension point to hang a menu on. They are kept,
+// still registered, because they are the shell's only file *mutations* and a
+// future surface (a menu-bar action, a command palette) could still want
+// them; `panel.rs`'s own file-op functions and tests are unchanged, so
+// deleting the wrappers would only spread the same churn.
 
 #[tauri::command]
 fn create_file(app: AppHandle, state: State<'_, AppState>, parent_path: String, name: String, override_path: Option<String>) -> Result<(), String> {
@@ -556,6 +559,28 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
 
 // ── window helpers ───────────────────────────────────────────────────────────
 
+/// The main window as a plain [`tauri::Window`] — the handle every
+/// window-level operation in this file must go through.
+///
+/// Deliberately **not** `app.get_webview_window("main")`. That lookup is
+/// `manager.get_webview(label)` plus a `Window::is_webview_window()` check,
+/// which (tauri 2.x) only passes while *every* webview in the window shares
+/// the window's own label. Since the harness moved into its own top-level
+/// child webview, window "main" holds two — "main" (the shell) and
+/// `HARNESS_WEBVIEW_LABEL` — so `get_webview_window("main")` answers `None`
+/// and every `if let Some(win) = ...` written on top of it became a silent
+/// no-op: minimize-to-tray stopped hiding the window (the close dialog's
+/// "最小化到托盘" button did nothing), and the tray/hotkey/relaunch paths
+/// below could no longer summon it back.
+///
+/// `get_window` reads the window table and has no such condition. Window
+/// operations (show/hide/focus/unminimize/decorations) belong here; only
+/// webview-level ones (`harness_*`, the WebView2 controller settings in
+/// `setup`) need `get_webview`.
+fn main_window(app: &AppHandle) -> Option<tauri::Window> {
+    app.get_window("main")
+}
+
 /// Un-hide, un-minimize, and focus the main window. Used by both the tray's
 /// "显示窗口" action and the single-instance relaunch callback below, so a
 /// second launch attempt (desktop icon, Start menu, ...) surfaces the
@@ -573,7 +598,7 @@ fn show_main_window(app: &AppHandle) {
     let app_in_closure = app.clone();
     let result = app.run_on_main_thread(move || {
         let app = app_in_closure;
-        if let Some(win) = app.get_webview_window("main") {
+        if let Some(win) = main_window(&app) {
             if let Err(e) = win.show() {
                 eprintln!("[dsh-desktop] show_main_window: show() failed: {e}");
             }
@@ -609,7 +634,7 @@ fn show_main_window_on_relaunch(app: &AppHandle) {
     let app_in_closure = app.clone();
     let result = app.run_on_main_thread(move || {
         let app = app_in_closure;
-        if let Some(win) = app.get_webview_window("main") {
+        if let Some(win) = main_window(&app) {
             match (win.is_visible(), win.is_minimized()) {
                 (Ok(true), Ok(false)) => {
                     // Already on screen — do nothing, don't steal focus.
@@ -1232,9 +1257,7 @@ pub fn run() {
             trigger_menu_action,
             check_for_update,
             install_update,
-            get_workspace_tree,
             get_git_status,
-            get_active_workspace,
             get_known_workspaces,
             get_editable_preview,
             save_file_content,
@@ -1285,18 +1308,25 @@ pub fn run() {
             // (worst) external-link routing, which would leave `target="_blank"`
             // links swallowed by WebView2's popup blocker and plain outbound
             // links navigating the harness away with no way back.
-            if let Some(win) = app.get_webview_window("main") {
-                let shell: &tauri::Webview = win.as_ref();
-                disable_context_menu(shell);
-                disable_zoom_control(shell);
-                disable_devtools(shell);
-                allow_clipboard_permission(shell);
-                install_external_link_handlers(&handle, shell);
-                // Windows-only: makes the maximized window's top strip
-                // deliver hover/click to the web content instead of a
-                // resize cursor — see window_proc.rs. Window-level (not a
-                // webview setting), so it stays on the WebviewWindow.
-                #[cfg(windows)]
+            if let Some(shell) = app.get_webview("main") {
+                disable_context_menu(&shell);
+                disable_zoom_control(&shell);
+                disable_devtools(&shell);
+                allow_clipboard_permission(&shell);
+                install_external_link_handlers(&handle, &shell);
+            } else {
+                // This whole block is silently skippable, and skipping it is
+                // invisible at runtime (no context menu suppression, no zoom
+                // lock, no DevTools lockout, no clipboard grant, no external
+                // link routing) — worth a line if the lookup ever misses.
+                eprintln!("[dsh-desktop] setup: no webview labeled \"main\"; shell WebView2 settings not applied");
+            }
+            // Windows-only: makes the maximized window's top strip deliver
+            // hover/click to the web content instead of a resize cursor —
+            // see window_proc.rs. Window-level (not a webview setting), so
+            // it takes the window handle (see `main_window`).
+            #[cfg(windows)]
+            if let Some(win) = main_window(&handle) {
                 window_proc::patch_maximized_hit_test(&win);
             }
 
@@ -1346,7 +1376,7 @@ pub fn run() {
             // ui/app.js (IS_MACOS) by hiding its custom window controls and
             // dropping the toolbar drag region.
             #[cfg(target_os = "macos")]
-            if let Some(win) = app.get_webview_window("main") {
+            if let Some(win) = main_window(&handle) {
                 win.set_decorations(true)?;
             }
 
