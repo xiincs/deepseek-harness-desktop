@@ -336,39 +336,6 @@ body.platform-decorated #toolbar-actions {
   background: var(--card-border);
 }
 
-/* Positioned dynamically at the click point (see openTreeContextMenu in
-   app.js), not anchored under a fixed trigger button like .app-menu above —
-   everything else about it (surface tokens, radius, shadow) matches
-   intentionally, it should read as the same kind of menu. z-index sits
-   above the toolbar/dock (.app-menu's 20) but below the confirm dialog's
-   40 — a delete confirmation opened from this menu must still be able to
-   layer on top of it. */
-.context-menu {
-  position: fixed;
-  z-index: 30;
-  min-width: 190px;
-  padding: 4px;
-  background: var(--card);
-  border: 1px solid var(--card-border);
-  border-radius: 10px;
-  box-shadow: var(--card-shadow);
-}
-
-.context-menu.hidden {
-  display: none;
-}
-
-/* Delete — same "review before you proceed" danger tint the confirm
-   dialog's own .danger OK button and the tree's git-deleted rows already
-   use, not a new color. */
-.context-menu-item-danger {
-  color: var(--danger);
-}
-
-.context-menu-item-danger:hover {
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
-}
-
 /* ── window controls: our own minimize/maximize/close, replacing the OS's ── */
 /*
    These replace the OS caption buttons on the frameless Windows/Linux
@@ -458,9 +425,7 @@ body.platform-decorated #toolbar-actions {
 }
 
 /* Each card is visually self-contained (own border/radius/shadow) and
-   scrolls independently — deliberately not one shared tree-then-content
-   flex flow with a drag-adjustable split, so closing or resizing one
-   never affects the other's layout. */
+   scrolls independently. */
 .dock-card {
   flex-shrink: 0;
   display: flex;
@@ -472,58 +437,18 @@ body.platform-decorated #toolbar-actions {
   overflow: hidden;
 }
 
-#card-files {
-  /* Grows to fill leftover space in #panel-cards when #card-file is
-     closed; once #card-file appears, #card-file's own max-height keeps
-     this from being squeezed to nothing. */
+/* The dock's only always-available card: whichever of #card-terminal/
+   #card-diff is open shares #panel-cards with it, both taking an equal
+   `flex: 1` (the preview is usually an aside next to the terminal, not a
+   thing the user wants three quarters of the dock for). With neither open
+   it's simply the whole dock. */
+#card-file {
   flex: 1;
   min-height: 120px;
 }
 
-/* Collapsed via the card's own chevron button — hides everything but the
-   header, independent of #card-file's own close button. */
-#card-files.card-collapsed {
-  flex: 0 0 auto;
-  min-height: 0;
-}
-
-#card-files.card-collapsed > *:not(.dock-card-header) {
-  display: none;
-}
-
-#card-file {
-  flex: 0 0 auto;
-  max-height: 60%;
-}
-
-/* Files collapsed frees up #panel-cards' vertical space — hand it to the
-   preview instead of leaving it empty below a capped-at-60% card. */
-#card-files.card-collapsed ~ #card-file {
-  flex: 1;
-  min-height: 0;
-  max-height: none;
-}
-
-/* Files + File-preview as one flex column, sized exactly like #panel-cards
-   itself (same flex/gap/min-height rules) so wrapping them here doesn't
-   change how they size relative to each other — only whether the pair as a
-   whole is showing at all. */
-#dock-view-files {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  flex: 1;
-  min-height: 0;
-}
-
-#dock-view-files.hidden {
-  display: none;
-}
-
-/* Mutually exclusive with #dock-view-files and #card-diff (see setDockView
-   in app.js) — a terminal reads as its own full pane whenever it's open,
-   unlike Files/File which are deliberately small, list/diff-sized panes
-   meant to sit side by side with each other. */
+/* Mutually exclusive with #card-diff (see setDockView in app.js) — a
+   terminal reads as its own full pane whenever it's open. */
 #card-terminal {
   flex: 1;
   min-height: 240px;
@@ -606,18 +531,16 @@ body.platform-decorated #toolbar-actions {
   display: none;
 }
 
-/* Mutually exclusive with #dock-view-files and #card-terminal, same as
-   #card-terminal above — full pane whenever open. */
+/* Mutually exclusive with #card-terminal, same as it above — full pane
+   whenever open. */
 #card-diff {
   flex: 1;
   min-height: 240px;
 }
 
-/* font-size/user-select mirror #panel-tree exactly — these rows reuse that
-   sidebar's own .tree-row/.tree-label classes (see renderDiffFile in
-   app.js), which don't set their own font-size, so without repeating it
-   here they'd inherit the page's larger base size instead of matching the
-   tree they're deliberately styled to look like. */
+/* font-size/user-select are set here rather than on .tree-row/.tree-label
+   themselves: those classes carry no font-size of their own, so without
+   repeating it here these rows would inherit the page's larger base size. */
 #diff-list {
   flex: 1;
   display: flex;
@@ -1130,30 +1053,6 @@ body.platform-decorated #toolbar-actions {
   margin: 8px 10px;
 }
 
-#panel-workspace-select {
-  width: 100%;
-  margin: 0;
-  padding: 6px 26px 6px 10px;
-  font-size: 11.5px;
-  font-family: inherit;
-  color: var(--text);
-  background: var(--sidebar-bg);
-  border: 1px solid var(--card-border);
-  border-radius: 8px;
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-}
-
-#panel-workspace-select:hover {
-  background: var(--btn-hover-bg);
-}
-
-#panel-workspace-select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
 .select-chevron {
   position: absolute;
   top: 50%;
@@ -1165,26 +1064,17 @@ body.platform-decorated #toolbar-actions {
   pointer-events: none;
 }
 
-/* This dialog's own category picker reuses .select-wrap (defined just
-   above, next to #panel-workspace-select) for the same hide-native-arrow +
-   sprite-chevron technique, but sits inline in a toolbar instead of a
-   block-level sidebar row — select-wrap-inline overrides just the parts
-   that assumed the latter (full-width, block margin). Declared after
-   .select-wrap itself, not before, so this override actually wins at equal
-   selector specificity — CSS cascade order, not just source tidiness. */
+/* This dialog's own category picker reuses .select-wrap for that same
+   hide-native-arrow + sprite-chevron technique, but sits inline in a toolbar
+   instead of a block-level sidebar row — select-wrap-inline overrides just
+   the parts that assumed the latter (full-width, block margin). Declared
+   after .select-wrap itself, not before, so this override actually wins at
+   equal selector specificity — CSS cascade order, not just source
+   tidiness. */
 .select-wrap-inline {
   flex-shrink: 0;
   margin: 0;
   width: auto;
-}
-
-#panel-tree {
-  flex: 1;
-  overflow-y: auto;
-  padding: 4px 8px 10px;
-  font-size: 12.5px;
-  user-select: text;
-  min-height: 0;
 }
 
 /* ── confirm dialog: non-blocking window.confirm()/alert() replacement ──
@@ -1474,31 +1364,6 @@ body.platform-decorated #toolbar-actions {
   background: var(--accent);
 }
 
-/* Horizontal-bar variant of the same handle — between #card-files and
-   #card-file (a column split, not a row split), so the axis flips: a
-   fixed height instead of width, row-resize cursor, and the drawn line
-   runs the other way. */
-.resize-handle-h {
-  width: auto;
-  height: 8px;
-  cursor: row-resize;
-  /* #panel-cards' flex gap (10px) applies on both sides of this handle,
-     same as it does between any other two adjacent children — stacking
-     two full gaps around an already-8px-tall element reads as an
-     oversized empty band. Negative margin claws part of that back,
-     without touching the shared gap value everything else still uses. */
-  margin: -7px 0;
-}
-.resize-handle-h::after {
-  inset: 3.5px 0;
-  /* Invisible at rest — only the 8px drag hit-target remains, so the two
-     cards read as closer together. Still reveals itself in the accent
-     color on hover/drag via the shared .resize-handle:hover::after /
-     .resize-handle.dragging::after rule above (unchanged, already generic
-     across both handle variants). */
-  background: transparent;
-}
-
 /* A drag anywhere reaches past whatever the pointer happens to be over
    (CodeMirror included) without fighting its own mouse handling — set for
    the drag's duration by the mousedown handler in ui/app.js. */
@@ -1507,15 +1372,6 @@ body.resizing {
   user-select: none;
 }
 body.resizing iframe {
-  pointer-events: none;
-}
-
-body.resizing-rows {
-  cursor: row-resize;
-  user-select: none;
-}
-body.resizing-rows iframe,
-body.resizing-rows #panel-preview-body {
   pointer-events: none;
 }
 
@@ -1670,49 +1526,13 @@ body.resizing-rows #panel-preview-body {
   cursor: pointer;
 }
 
-.tree-dir > .tree-label {
-  font-weight: 500;
-}
-
 .tree-row:hover {
   background: var(--btn-hover-bg);
 }
 
-.tree-row-selected {
-  background: var(--accent-tint-bg);
-  color: var(--accent-tint-text);
-}
-
-/* The row currently being dragged (see renderTreeNode's dragstart/dragend
-   in app.js) — same idea as the browser's own default half-opacity drag
-   image, just on the source row itself so it's still visible as "this is
-   what's moving" even where the OS-drawn drag image doesn't cover. */
-.tree-row-dragging {
-  opacity: 0.5;
-}
-
-/* A folder row currently being dragged over with a valid drop in progress —
-   outline instead of just a background swap so it reads clearly even
-   against .tree-row-selected/git-status tinting on the same row. */
-.tree-row-drop-target {
-  background: var(--accent-tint-bg);
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-
-.tree-row-selected .tree-label {
-  color: inherit;
-}
-
-/* Empty for a leaf row — keeps the file icon that follows it lined up
-   under directory rows' actual caret, one column over. */
-.tree-caret,
-.tree-caret-spacer {
-  flex-shrink: 0;
-  width: 12px;
-  height: 12px;
-}
-
+/* Disclosure caret on a Diff view row: points right while the row is
+   collapsed, rotates to point down once expanded (see renderDiffFile in
+   app.js). */
 .tree-caret {
   color: var(--muted);
   transition: transform 0.12s ease;
@@ -1735,14 +1555,6 @@ body.resizing-rows #panel-preview-body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.tree-children {
-  margin-left: 14px;
-}
-
-.tree-children.collapsed {
-  display: none;
 }
 
 /* Dual-coded, not color-only: text tint plus a trailing M/A/D/U chip (added
@@ -1789,10 +1601,6 @@ body.resizing-rows #panel-preview-body {
   background: var(--btn-hover-bg);
   color: var(--muted);
 }
-.tree-row-selected .git-badge {
-  color: inherit;
-}
-
 #footer {
   padding: 10px 16px 14px;
   border-top: 1px solid var(--card-border);

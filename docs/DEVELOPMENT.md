@@ -30,7 +30,7 @@ npm run tauri dev    # 编译 Rust 外壳并打开应用窗口
 | `DSH_DESKTOP_NODE` | 指定 `node.exe` 的绝对路径，代替 `PATH` 上那个 |
 | `DSH_DESKTOP_DSH_BIN` | 指定某个 `dsh` `lib/bin.js` 的绝对路径（比如本地某个 checkout） |
 | `DSH_DESKTOP_RUNTIME_DIR` | 托管的 `@deepseek-ai/dsh` 运行时安装位置（默认是应用缓存目录）；指向一个已有的 `node_modules` 根目录可以跳过首次的 npm install |
-| `DSH_DESKTOP_DSH_VERSION` | 托管运行时使用的 npm 版本号（默认 `0.1.5-rc.1`，与 npm 的 `latest` 保持一致；想尝鲜未转正的版本时用它覆盖） |
+| `DSH_DESKTOP_DSH_VERSION` | 托管运行时使用的 npm 版本号（默认 `0.1.5-rc.2`，与 npm 的 `latest` 保持一致；想尝鲜未转正的版本时用它覆盖） |
 | `DSH_DESKTOP_PORT` | 默认绑定端口覆盖（默认 `3080`）；同时跑多个实例时很有用 |
 | `DSH_DESKTOP_CWD` | `dsh` 服务进程的工作目录（默认是用户主目录） |
 | `DSH_HOME` | 透传给服务端；harness 数据根目录（默认 `~/.dsh`） |
@@ -129,7 +129,7 @@ RC 发到 `next`（或者不挂任何 tag），观察一段时间再决定要不
 是 npm 的 `latest`，只要验证过这个外壳跑不起来，就不跟进**，脚本把落后当成预期结果放行。它曾经用来
 豁免 `0.1.5-rc.1`，**现在表是空的**——因为障碍是被修掉的，不是被容忍的（下详）。
 
-原因不是 bug，是上游刻意的浏览器认证，而且它**要求同站**。对 npm 当前发布的 `0.1.5-rc.1` 实测：
+原因不是 bug，是上游刻意的浏览器认证，而且它**要求同站**。下面这几条是对 `0.1.5-rc.1` 实测的；`0.1.5-rc.2` 未见改动，但**没有重新逐条验证过**（上游会重新发布同一版本号的内容，真要下结论以当前 npm 发布的那份为准）：
 
 - 启动行变成 `dsh web: http://127.0.0.1:<port>/?token=<secret>`，**token 是必填的**；
 - 不带 cookie 的 `GET /` 一律返回 **401** `dsh web authentication required; reopen the URL printed
@@ -154,7 +154,7 @@ cookie 永远不生效，于是窗口里只剩那行 401 文案。顺带一提�
 文档，`SameSite=Strict` 的 cookie 才存得下、带得上，认证与 `/api` 才走得通；同时 harness 依旧拿不到
 Tauri IPC（`dangerousRemoteDomainIpcAccess` 保持关闭，远程来源不注入 IPC）。注意**不要**为了让 iframe
 同源而把外壳页面也搬到 `127.0.0.1` 上——那需要给这个来源开远程 IPC 权限，会连带把 harness 的端口也
-放进来，直接破坏"harness 页面零 IPC"这条边界。`DSH_VERSION_DEFAULT` 现已跟到 `0.1.5-rc.1`。
+放进来，直接破坏"harness 页面零 IPC"这条边界。`DSH_VERSION_DEFAULT` 现已跟到 npm 的 `latest`。
 
 **两个随架构而来的副作用**（写在 CLAUDE.md 里，改动时别丢）：harness 子 webview 是盖在 shell 页面
 之上的兄弟原生 webview，会挡住 DOM 覆盖层（靠 `app.js` 的 `syncHarnessVisibility()` 遮挡时隐藏）；

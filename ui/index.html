@@ -184,9 +184,6 @@
           <button id="btn-toolbar-diff" class="toolbar-btn" title="Diff" data-i18n-title="diff">
             <svg class="icon"><use href="#icon-columns"></use></svg>
           </button>
-          <button id="btn-toolbar-files" class="toolbar-btn" title="文件" data-i18n-title="files">
-            <svg class="icon"><use href="#icon-folder"></use></svg>
-          </button>
         </div>
         <div id="window-controls" class="hidden">
           <button id="btn-win-minimize" class="window-btn" title="最小化" data-i18n-title="minimize">
@@ -292,60 +289,30 @@
         <aside id="panel" class="hidden">
           <div id="panel-cards">
             <!--
-              Groups Files + File-preview into one unit so the Terminal/Diff
-              views (siblings below, mutually exclusive with this one — see
-              setDockView in app.js) can hide both together with a single
-              class toggle, without touching either card's own internal
-              open/closed state (btn-preview-close etc. still work exactly
-              as before, just now on a card that may itself be hidden by
-              this wrapper).
+              File-preview card. It used to sit under a Files card holding
+              this shell's own workspace tree, split by a drag handle; that
+              tree is gone — dsh's own right-hand Sidebar ships one
+              (@deepseek-ai/dsh-client-ui-sidebar-files), and two trees over
+              the same workspace showing different roots was the whole
+              complaint. This card survives because it does something the
+              kernel's does not: edit and save.
             -->
-            <div id="dock-view-files">
-              <section id="card-files" class="dock-card">
-                <div class="dock-card-header">
-                  <span class="dock-card-title" data-i18n="files">文件</span>
-                  <div class="dock-card-actions">
-                    <button id="btn-panel-refresh" title="刷新文件树与 Git 状态" data-i18n-title="refreshTreeTitle">
-                      <svg class="icon"><use href="#icon-refresh"></use></svg>
-                    </button>
-                    <button id="btn-files-collapse" title="收起" data-i18n-title="collapse">
-                      <svg class="icon"><use href="#icon-chevron-up"></use></svg>
-                    </button>
-                  </div>
+            <section id="card-file" class="dock-card hidden">
+              <div class="dock-card-header">
+                <div id="panel-preview-title-group">
+                  <span id="panel-preview-title"></span>
+                  <span id="panel-preview-dirty-dot" class="hidden" title="有未保存的改动" data-i18n-title="unsavedChangesTitle">●</span>
                 </div>
-                <div class="select-wrap">
-                  <select id="panel-workspace-select" title="选择要在文件树中查看的工作区" data-i18n-title="chooseWorkspaceTitle"></select>
-                  <svg class="select-chevron"><use href="#icon-chevron-down"></use></svg>
+                <div class="dock-card-actions">
+                  <!-- Only unhidden for .md files — see isMarkdownPath/mountEditor in app.js. -->
+                  <button id="btn-preview-markdown-toggle" class="hidden" data-i18n="previewMarkdown">预览</button>
+                  <button id="btn-preview-revert" class="hidden" title="放弃改动，还原为已保存内容" data-i18n-title="revertTitle" data-i18n="revert">还原</button>
+                  <button id="btn-preview-save" class="hidden" title="保存改动 (Ctrl+S)" data-i18n-title="saveTitle" data-i18n="save">保存</button>
+                  <button id="btn-preview-close" title="关闭预览" data-i18n-title="closePreviewTitle">✕</button>
                 </div>
-                <div id="panel-tree"></div>
-              </section>
-
-              <!--
-                Only meaningful (and only shown — see syncCardResizeHandleVisibility
-                in app.js) while both cards are in their normal state: collapsed
-                Files already claims this space for File via CSS (see the
-                #card-files.card-collapsed ~ #card-file rule), and there's
-                nothing to split against a closed File card.
-              -->
-              <div id="resize-panel-cards" class="resize-handle resize-handle-h hidden" role="separator" aria-orientation="horizontal"></div>
-
-              <section id="card-file" class="dock-card hidden">
-                <div class="dock-card-header">
-                  <div id="panel-preview-title-group">
-                    <span id="panel-preview-title"></span>
-                    <span id="panel-preview-dirty-dot" class="hidden" title="有未保存的改动" data-i18n-title="unsavedChangesTitle">●</span>
-                  </div>
-                  <div class="dock-card-actions">
-                    <!-- Only unhidden for .md files — see isMarkdownPath/mountEditor in app.js. -->
-                    <button id="btn-preview-markdown-toggle" class="hidden" data-i18n="previewMarkdown">预览</button>
-                    <button id="btn-preview-revert" class="hidden" title="放弃改动，还原为已保存内容" data-i18n-title="revertTitle" data-i18n="revert">还原</button>
-                    <button id="btn-preview-save" class="hidden" title="保存改动 (Ctrl+S)" data-i18n-title="saveTitle" data-i18n="save">保存</button>
-                    <button id="btn-preview-close" title="关闭预览" data-i18n-title="closePreviewTitle">✕</button>
-                  </div>
-                </div>
-                <div id="panel-preview-body"></div>
-              </section>
-            </div>
+              </div>
+              <div id="panel-preview-body"></div>
+            </section>
 
             <section id="card-terminal" class="dock-card hidden">
               <div class="dock-card-header">
@@ -601,17 +568,6 @@
         </div>
       </div>
     </div>
-    <!--
-      File tree right-click menu (see openTreeContextMenu in app.js) — built
-      fresh into this one empty container on every right-click rather than a
-      static template, since which items show up depends on what was
-      clicked (a file, a folder, or empty tree space). Reuses .app-menu-item/
-      .app-menu-sep directly (see #app-menu above) rather than a parallel
-      set of look-alike item styles — only the outer positioning differs
-      (position: fixed at the click point, not anchored under a toolbar
-      button).
-    -->
-    <div id="tree-context-menu" class="context-menu hidden" role="menu"></div>
     <!--
       A real code editor (CodeMirror 6), not a highlighter + textarea +
       hand-rolled diff view: opening a file goes straight to an editable

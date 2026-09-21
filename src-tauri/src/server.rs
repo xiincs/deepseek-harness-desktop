@@ -56,7 +56,7 @@ pub const DEFAULT_PORT: u16 = 3080;
 /// prereleases (same version string, different contents), and an older copy in
 /// `~/.dsh` whose build had the auth unwired once produced a completely wrong
 /// "0.1.5 has no auth" conclusion. Check what npm currently publishes.
-const DSH_VERSION_DEFAULT: &str = "0.1.5-rc.1";
+const DSH_VERSION_DEFAULT: &str = "0.1.5-rc.2";
 /// Marker found verbatim in the harness index page (served uncompressed).
 const INDEX_MARKER: &str = "DeepSeek Harness";
 /// Stable fragment of the body dsh answers an unauthenticated `GET /` with as

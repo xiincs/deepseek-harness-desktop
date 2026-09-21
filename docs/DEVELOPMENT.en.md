@@ -30,7 +30,7 @@ so it is fast and offline after the first run.
 | `DSH_DESKTOP_NODE` | Absolute path to `node.exe` to use instead of the one on `PATH` |
 | `DSH_DESKTOP_DSH_BIN` | Absolute path to a `dsh` `lib/bin.js` (e.g. a local checkout) |
 | `DSH_DESKTOP_RUNTIME_DIR` | Where the managed `@deepseek-ai/dsh` runtime is installed (default: app cache dir); point it at an existing `node_modules` root to skip the first-run npm install |
-| `DSH_DESKTOP_DSH_VERSION` | npm version spec for the managed runtime (default `0.1.5-rc.1`, matching npm's `latest`; override it to try a version that hasn't been promoted yet) |
+| `DSH_DESKTOP_DSH_VERSION` | npm version spec for the managed runtime (default `0.1.5-rc.2`, matching npm's `latest`; override it to try a version that hasn't been promoted yet) |
 | `DSH_DESKTOP_PORT` | Default bind port override (default `3080`); handy for running several instances |
 | `DSH_DESKTOP_CWD` | Working directory for the `dsh` server process (default: user home) |
 | `DSH_HOME` | Passed through to the server; harness data root (default `~/.dsh`) |
@@ -143,7 +143,7 @@ expected outcome rather than a failure. Today that table holds exactly one entry
 `0.1.5-rc.1`.
 
 The cause isn't a bug — it's upstream's deliberate browser authentication, and it **requires
-same-site**. Measured against the `0.1.5-rc.1` npm currently publishes:
+same-site**. Measured against the `0.1.5-rc.1` build; `0.1.5-rc.2` shows no change here, but has **not** been re-verified line by line (upstream republishes these version strings, so measure against what npm currently ships before concluding anything):
 
 - the startup line becomes `dsh web: http://127.0.0.1:<port>/?token=<secret>` — the **token is
   required**;
@@ -177,6 +177,6 @@ The harness still gets no Tauri IPC, since `dangerousRemoteDomainIpcAccess` stay
 origins are never injected with it. Do **not** try to make the iframe same-origin by moving the
 shell page onto `127.0.0.1` as well — that needs remote-IPC access granted to that origin, which
 would hand it to the harness's port too and break the "harness pages get zero IPC"
-boundary outright. `DSH_VERSION_DEFAULT` now tracks `0.1.5-rc.1`, and the `NOT_ADOPTABLE` table is
+boundary outright. `DSH_VERSION_DEFAULT` now tracks npm’s `latest`, and the `NOT_ADOPTABLE` table is
 empty — the blocker was fixed rather than tolerated.
 </content>

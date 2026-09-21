@@ -77,7 +77,7 @@ const SUBCLASS_ID_PARENT: usize = 0x4453_4801; // "DSH" …01
 /// The maximized state is re-checked on every message, so
 /// maximize/restore transitions need no bookkeeping beyond the WM_SIZE
 /// show/hide above.
-pub fn patch_maximized_hit_test(win: &tauri::WebviewWindow) {
+pub fn patch_maximized_hit_test(win: &tauri::Window) {
     let Ok(hwnd) = win.hwnd() else {
         eprintln!("[dsh-desktop] window_proc: hwnd() failed");
         return;

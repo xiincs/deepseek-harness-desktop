@@ -35,18 +35,10 @@ const els = {
   providerTip: document.getElementById("provider-tip"),
   btnProviderTipDismiss: document.getElementById("btn-provider-tip-dismiss"),
   panel: document.getElementById("panel"),
-  panelWorkspaceSelect: document.getElementById("panel-workspace-select"),
-  panelTree: document.getElementById("panel-tree"),
-  treeContextMenu: document.getElementById("tree-context-menu"),
-  btnPanelRefresh: document.getElementById("btn-panel-refresh"),
   resizePanelContent: document.getElementById("resize-panel-content"),
-  panelCards: document.getElementById("panel-cards"),
-  resizePanelCards: document.getElementById("resize-panel-cards"),
-  btnToolbarFiles: document.getElementById("btn-toolbar-files"),
   btnToolbarTerminal: document.getElementById("btn-toolbar-terminal"),
   btnToolbarDiff: document.getElementById("btn-toolbar-diff"),
   btnToolbarPlugins: document.getElementById("btn-toolbar-plugins"),
-  dockViewFiles: document.getElementById("dock-view-files"),
   cardTerminal: document.getElementById("card-terminal"),
   terminalTabsEl: document.getElementById("terminal-tabs"),
   terminalContainer: document.getElementById("terminal-container"),
@@ -87,10 +79,8 @@ const els = {
   btnWinMinimize: document.getElementById("btn-win-minimize"),
   btnWinMaximize: document.getElementById("btn-win-maximize"),
   btnWinClose: document.getElementById("btn-win-close"),
-  btnFilesCollapse: document.getElementById("btn-files-collapse"),
   btnAppMenu: document.getElementById("btn-app-menu"),
   appMenu: document.getElementById("app-menu"),
-  cardFiles: document.getElementById("card-files"),
   cardFile: document.getElementById("card-file"),
   panelPreviewTitle: document.getElementById("panel-preview-title"),
   panelPreviewDirtyDot: document.getElementById("panel-preview-dirty-dot"),
@@ -152,7 +142,6 @@ const STRINGS = {
     refreshDiffTitle: "刷新 Diff",
     noChanges: "没有改动",
     diffLoadFailed: (err) => `无法加载 Diff: ${err}`,
-    files: "文件",
     minimize: "最小化",
     maximize: "最大化",
     restore: "还原",
@@ -180,32 +169,9 @@ const STRINGS = {
     setWorkspaceReset: "恢复默认（用户主目录）",
     startupFailed: "启动失败",
     retry: "重试",
-    refreshTreeTitle: "刷新文件树与 Git 状态",
-    collapse: "收起",
-    chooseWorkspaceTitle: "选择要在文件树中查看的工作区",
     unsavedChangesTitle: "有未保存的改动",
     previewMarkdown: "预览",
     editMarkdown: "编辑",
-    newFile: "新建文件",
-    newFolder: "新建文件夹",
-    rename: "重命名",
-    deleteEntry: "删除",
-    copyPath: "复制路径",
-    copyRelativePath: "复制相对路径",
-    revealInFileManager: "在文件资源管理器中显示",
-    openWithDefaultApp: "打开",
-    newFileNamePrompt: "输入新文件名",
-    newFolderNamePrompt: "输入新文件夹名",
-    renamePrompt: "输入新名称",
-    create: "创建",
-    confirmDeleteEntry: (path) => `确定要删除 "${path}" 吗？此操作会将其移至回收站，而不是永久删除。`,
-    createEntryFailed: (err) => `创建失败: ${err}`,
-    renameEntryFailed: (err) => `重命名失败: ${err}`,
-    moveEntryFailed: (err) => `移动失败: ${err}`,
-    deleteEntryFailed: (err) => `删除失败: ${err}`,
-    revealFailed: (err) => `无法打开文件资源管理器: ${err}`,
-    openWithDefaultAppFailed: (err) => `无法打开: ${err}`,
-    copyPathFailed: (err) => `复制路径失败: ${err}`,
     revert: "还原",
     revertTitle: "放弃改动，还原为已保存内容",
     save: "保存",
@@ -269,10 +235,6 @@ const STRINGS = {
     previewLoadFailed: (err) => `预览加载失败: ${err}`,
     confirmRevert: "放弃当前改动，还原为上次保存的内容？",
     saveFailed: (err) => `保存失败: ${err}`,
-    autoFollowWithLabel: (label) => `自动跟随（${label}）`,
-    autoFollowSession: "自动跟随当前会话",
-    emptyWorkspace: "空工作区",
-    treeLoadFailed: (err) => `无法加载文件树: ${err}`,
     fileNotInKnownWorkspace: "该文件不属于任何已知工作区",
     dataDirLabel: (path) => `数据目录 ${path}`,
   },
@@ -290,7 +252,6 @@ const STRINGS = {
     refreshDiffTitle: "Refresh Diff",
     noChanges: "No changes",
     diffLoadFailed: (err) => `Failed to load diff: ${err}`,
-    files: "Files",
     minimize: "Minimize",
     maximize: "Maximize",
     restore: "Restore",
@@ -318,32 +279,9 @@ const STRINGS = {
     setWorkspaceReset: "Reset to default (home folder)",
     startupFailed: "Startup Failed",
     retry: "Retry",
-    refreshTreeTitle: "Refresh file tree and Git status",
-    collapse: "Collapse",
-    chooseWorkspaceTitle: "Choose which workspace to show in the file tree",
     unsavedChangesTitle: "Unsaved changes",
     previewMarkdown: "Preview",
     editMarkdown: "Edit",
-    newFile: "New File",
-    newFolder: "New Folder",
-    rename: "Rename",
-    deleteEntry: "Delete",
-    copyPath: "Copy Path",
-    copyRelativePath: "Copy Relative Path",
-    revealInFileManager: "Reveal in File Manager",
-    openWithDefaultApp: "Open",
-    newFileNamePrompt: "Enter a file name",
-    newFolderNamePrompt: "Enter a folder name",
-    renamePrompt: "Enter a new name",
-    create: "Create",
-    confirmDeleteEntry: (path) => `Delete "${path}"? This moves it to the recycle bin, not a permanent delete.`,
-    createEntryFailed: (err) => `Failed to create: ${err}`,
-    renameEntryFailed: (err) => `Rename failed: ${err}`,
-    moveEntryFailed: (err) => `Move failed: ${err}`,
-    deleteEntryFailed: (err) => `Delete failed: ${err}`,
-    revealFailed: (err) => `Failed to open file manager: ${err}`,
-    openWithDefaultAppFailed: (err) => `Failed to open: ${err}`,
-    copyPathFailed: (err) => `Failed to copy path: ${err}`,
     revert: "Revert",
     revertTitle: "Discard changes and revert to the last saved version",
     save: "Save",
@@ -409,10 +347,6 @@ const STRINGS = {
     previewLoadFailed: (err) => `Failed to load preview: ${err}`,
     confirmRevert: "Discard current changes and revert to the last saved version?",
     saveFailed: (err) => `Save failed: ${err}`,
-    autoFollowWithLabel: (label) => `Auto-follow (${label})`,
-    autoFollowSession: "Auto-follow current session",
-    emptyWorkspace: "Empty workspace",
-    treeLoadFailed: (err) => `Failed to load file tree: ${err}`,
     fileNotInKnownWorkspace: "This file doesn't belong to any known workspace",
     dataDirLabel: (path) => `Data folder ${path}`,
   },
@@ -804,113 +738,47 @@ function initResizeHandle() {
   });
 }
 
-// ── resizable card split ────────────────────────────────────────────────
-//
-// A second, vertical drag handle between #card-files and #card-file —
-// only meaningful while both are in their normal (non-collapsed, open)
-// state; syncCardResizeHandleVisibility hides it otherwise, and the
-// #card-files.card-collapsed ~ #card-file CSS rule already gives File the
-// full height on its own once Files collapses, independent of whatever
-// height was last dragged here.
-//
-// Unset (null) until the user actually drags: #card-file's CSS
-// max-height:60% default keeps applying until then, same as
-// DEFAULT_PANEL_WIDTH's role above but via "no override yet" rather than a
-// numeric default, since unlike the dock's width this one has a perfectly
-// good zero-JS fallback already in the stylesheet.
-const CARD_FILE_HEIGHT_KEY = "dsh-desktop-card-file-height";
-let cardFileHeight = loadStoredPixels(CARD_FILE_HEIGHT_KEY, null);
-
-// Matches #card-files' own CSS min-height — the floor this drag leaves it,
-// so dragging past that point simply stops growing #card-file further
-// rather than the two fighting over the same pixels.
-const MIN_FILES_HEIGHT = 120;
-const MIN_CARD_FILE_HEIGHT = 100;
-
-function applyCardFileHeight() {
-  // Collapsed Files already hands File 100% via CSS — an inline style here
-  // would (inline always outranks a class selector) override that and pin
-  // File back to its last dragged height instead, so this stays cleared
-  // for exactly as long as Files is collapsed.
-  const collapsed = els.cardFiles.classList.contains("card-collapsed");
-  if (collapsed || cardFileHeight === null) {
-    els.cardFile.style.flexBasis = "";
-    els.cardFile.style.maxHeight = "";
-  } else {
-    els.cardFile.style.flexBasis = `${cardFileHeight}px`;
-    els.cardFile.style.maxHeight = "none";
-  }
-}
-
-// The handle only makes sense — and is only shown — while there's an
-// actual split to drag: Files expanded and a file open in the card below.
-function syncCardResizeHandleVisibility() {
-  const visible = !els.cardFiles.classList.contains("card-collapsed") && !els.cardFile.classList.contains("hidden");
-  els.resizePanelCards.classList.toggle("hidden", !visible);
-}
-
-function initCardsResizeHandle() {
-  els.resizePanelCards.addEventListener("mousedown", (downEvent) => {
-    downEvent.preventDefault();
-    els.resizePanelCards.classList.add("dragging");
-    document.body.classList.add("resizing-rows");
-
-    const startY = downEvent.clientY;
-    const startHeight = els.cardFile.getBoundingClientRect().height;
-
-    // The handle sits between Files (above) and File (below): dragging up
-    // (negative delta) shrinks Files and should grow File, hence the sign
-    // flip versus a naive "add the delta" — mirrors initResizeHandle's own
-    // clientX-from-the-right-edge inversion above for the same reason.
-    const onMouseMove = (moveEvent) => {
-      const delta = moveEvent.clientY - startY;
-      const candidate = startHeight - delta;
-      const max = Math.max(MIN_CARD_FILE_HEIGHT, els.panelCards.clientHeight - MIN_FILES_HEIGHT);
-      cardFileHeight = Math.max(MIN_CARD_FILE_HEIGHT, Math.min(max, candidate));
-      applyCardFileHeight();
-    };
-    const onMouseUp = () => {
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
-      els.resizePanelCards.classList.remove("dragging");
-      document.body.classList.remove("resizing-rows");
-      localStorage.setItem(CARD_FILE_HEIGHT_KEY, String(Math.round(cardFileHeight)));
-    };
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
-  });
-}
-
 // ── dock view switching ─────────────────────────────────────────────────
 //
-// One dock (#panel), three mutually exclusive views — Files, Terminal and
-// Diff share the same toolbar button group for a reason: opening one is
-// meant to replace whichever of the others was open, not stack beside it
-// (unlike Files vs. its own File-preview card, which *are* meant to sit
-// together — see #dock-view-files). None is persisted across launches; each
-// toolbar button is a deliberate opt-in per session. Only the dock's width
-// (once opened) is remembered, via panelWidth/PANEL_WIDTH_KEY above.
+// One dock (#panel), two mutually exclusive views — Terminal and Diff —
+// sharing the same toolbar button group for a reason: opening one is meant
+// to replace the other, not stack beside it. (There used to be a third,
+// Files, holding this shell's own workspace tree; it's gone — see the
+// comment on #card-file in index.html.) Neither is persisted across
+// launches; each toolbar button is a deliberate opt-in per session. Only
+// the dock's width (once opened) is remembered, via
+// panelWidth/PANEL_WIDTH_KEY above.
+//
+// #card-file (the editable preview) is deliberately *not* part of this
+// either/or: it sits in #panel-cards alongside whichever view is open — it's
+// what a clicked file reference from the harness opens into — so whether the
+// dock is showing at all is decided by syncPanelVisibility() below, not by
+// `view === null` here.
 
-// `refresh: false` lets a caller that's about to drive its own, carefully
-// ordered refresh (see handleFileMention) switch to the Files view without
-// also kicking off this function's own un-awaited refreshPanel() — two
-// concurrent, uncoordinated tree renders racing against each other, one of
-// which could win before the caller's own state (e.g. currentPreviewPath)
-// is actually set, would put the exact same stale-selection race right back
-// after fixing it in the caller. Only meaningful for view: "files" —
-// opening the terminal/diff views already have their own, independent
-// readiness gates (ensureTerminalOpen()/refreshDiffView()) that this option
-// doesn't touch either way.
-function setDockView(view, { refresh = true } = {}) {
-  // view: "files" | "terminal" | "diff" | null (closed) — the plugin market
-  // lives outside this dock entirely now (see #plugin-market-overlay in
+/// Shows the dock exactly when it has something in it.
+///
+/// Not just `view !== null`: #card-file isn't one of the switchable views, it
+/// sits in #panel-cards alongside whichever is open and can legitimately be
+/// the *only* thing showing — closing the terminal's last tab calls
+/// setDockView(null), and hiding the whole dock there would take a file the
+/// user is reading down with it. Conversely the preview closing on its own
+/// must not leave an empty dock strip behind, which is why
+/// closePreviewUnchecked() calls this too.
+function syncPanelVisibility() {
+  const anyCardShown =
+    !els.cardTerminal.classList.contains("hidden") ||
+    !els.cardDiff.classList.contains("hidden") ||
+    !els.cardFile.classList.contains("hidden");
+  els.panel.classList.toggle("hidden", !anyCardShown);
+  els.resizePanelContent.classList.toggle("hidden", !anyCardShown);
+}
+
+function setDockView(view) {
+  // view: "terminal" | "diff" | null (closed) — the plugin market lives
+  // outside this dock entirely now (see #plugin-market-overlay in
   // index.html and togglePluginMarket below), so it's not a case here.
-  const filesOpen = view === "files";
   const terminalOpen = view === "terminal";
   const diffOpen = view === "diff";
-
-  els.btnToolbarFiles.classList.toggle("active", filesOpen);
-  els.dockViewFiles.classList.toggle("hidden", !filesOpen);
 
   els.btnToolbarTerminal.classList.toggle("active", terminalOpen);
   els.cardTerminal.classList.toggle("hidden", !terminalOpen);
@@ -918,10 +786,8 @@ function setDockView(view, { refresh = true } = {}) {
   els.btnToolbarDiff.classList.toggle("active", diffOpen);
   els.cardDiff.classList.toggle("hidden", !diffOpen);
 
-  els.panel.classList.toggle("hidden", view === null);
-  els.resizePanelContent.classList.toggle("hidden", view === null);
+  syncPanelVisibility();
 
-  if (filesOpen && refresh) refreshPanel();
   if (terminalOpen) {
     ensureTerminalOpen();
   }
@@ -934,10 +800,6 @@ function setDockView(view, { refresh = true } = {}) {
   } else {
     teardownDiffView();
   }
-}
-
-function toggleDock() {
-  setDockView(els.btnToolbarFiles.classList.contains("active") ? null : "files");
 }
 
 // ── terminal ─────────────────────────────────────────────────────────────
@@ -1159,22 +1021,17 @@ function toggleTerminal() {
 // is a parallel function rather than a shared one, since nothing here is
 // ever editable and there can be many mounted at once.
 //
-// No background poll while this view is open (unlike
-// refreshTreeAndGitStatus's PANEL_POLL_MS cadence): rebuilding the whole
-// list out from under a user mid-way through reading a diff would blow away
-// their expanded rows and remount every open CodeMirror instance. Refreshes
-// only on open (setDockView) and via btn-diff-refresh, both explicit user
-// actions — and every refresh tears down and rebuilds from scratch (see
+// No background poll while this view is open: rebuilding the whole list out
+// from under a user mid-way through reading a diff would blow away their
+// expanded rows and remount every open CodeMirror instance. Refreshes only on
+// open (setDockView) and via btn-diff-refresh, both explicit user actions —
+// and every refresh tears down and rebuilds from scratch (see
 // teardownDiffView), so there's no incremental-update path to keep in sync.
+// (The shell's own 6s poll, PANEL_POLL_MS, only re-fetches the open preview.)
 
 let diffEditorViews = [];
-// Paths the user expanded, same idea as expandedDirs for the tree — lets a
-// manual refresh restore what was open instead of collapsing everything.
-// Not workspace-scoped/cleared on switch like expandedDirs is: worst case a
-// coincidentally same-relative-path file in a different workspace
-// auto-expands once, which is harmless (unlike the tree, this view always
-// does a full teardown-and-rebuild anyway, never an in-place incremental
-// update a stale entry could actually corrupt).
+// Paths the user expanded, so a manual refresh restores what was open instead
+// of collapsing everything.
 const expandedDiffFiles = new Set();
 // Bumped by every teardown — refreshDiffView compares against this after
 // its own await to tell whether it's still the most recent refresh, same
@@ -1231,11 +1088,11 @@ function mountDiffContent(container, path, preview) {
   diffEditorViews.push(new CM.EditorView({ doc: normalizeLineEndings(current.content), extensions, parent: container }));
 }
 
-// One row per changed file, reusing the tree's own row/badge classes
-// (tree-row/tree-file/tree-caret/git-badge/GIT_STATUS_CLASS) rather than a
-// second parallel set of look-alike styles — visually it *is* the same kind
-// of row (icon, path, status badge, disclosure caret), just inside
-// #diff-list instead of #panel-tree.
+// One row per changed file, using the tree-row/tree-file/tree-caret/git-badge
+// /GIT_STATUS_CLASS family in styles.css rather than a second parallel set of
+// look-alike styles. Those classes outlived the tree they were named for —
+// this is their only remaining user, and they still read as what they are: a
+// file row with icon, path, status badge and disclosure caret.
 function renderDiffFile(entry) {
   const wrap = document.createElement("div");
 
@@ -1272,7 +1129,7 @@ function renderDiffFile(entry) {
     loading.textContent = t("loading");
     body.appendChild(loading);
     try {
-      const preview = await invoke("get_editable_preview", { path: entry.path, overridePath: lockedWorkspace });
+      const preview = await invoke("get_editable_preview", { path: entry.path });
       // A refresh (manual, or the view closing) may have already rebuilt
       // #diff-list from scratch while this fetch was in flight, detaching
       // this exact row from the document — mounting into it at that point
@@ -1313,7 +1170,7 @@ async function refreshDiffView() {
   teardownDiffView();
   const token = diffRefreshToken;
   try {
-    const gitEntries = await invoke("get_git_status", { overridePath: lockedWorkspace });
+    const gitEntries = await invoke("get_git_status");
     // A newer refresh (or the view closing, which also bumps this via
     // teardownDiffView) already superseded this call — don't clobber
     // whatever it already rendered with this older response.
@@ -1751,7 +1608,7 @@ const GIT_STATUS_CLASS = {
 };
 
 // One-letter badge text, paired with GIT_STATUS_CLASS for color (see
-// renderTreeNode) — VS Code's own convention, and a second, non-color-only
+// renderDiffFile) — VS Code's own convention, and a second, non-color-only
 // encoding of the same status the row's text tint already carries.
 const GIT_STATUS_LETTER = {
   modified: "M",
@@ -1778,15 +1635,14 @@ function iconEl(name, cls) {
 }
 
 // Briefly swaps a refresh button's icon to a checkmark to confirm the click
-// actually did something — refreshPanel()/refreshDiffView() read local
-// disk/git state, not a network call, so they're usually fast enough that a
-// click otherwise has no visible sign it did anything at all. Purely
-// cosmetic: fires once the refresh call resolves, regardless of whether it
-// hit an internal error (those already render as very visible text
-// replacing the whole panel's content, so a checkmark alongside that isn't
-// hiding anything). Keyed by button element so a rapid second click on the
-// same button restarts its own revert timer instead of two overlapping
-// ones racing to reset the icon.
+// actually did something — refreshDiffView() reads local git state, not a
+// network call, so it's usually fast enough that a click otherwise has no
+// visible sign it did anything at all. Purely cosmetic: fires once the
+// refresh call resolves, regardless of whether it hit an internal error
+// (those already render as very visible text replacing the whole view's
+// content, so a checkmark alongside that isn't hiding anything). Keyed by
+// button element so a rapid second click on the same button restarts its
+// own revert timer instead of two overlapping ones racing to reset the icon.
 const refreshFlashTimers = new Map();
 function flashRefreshSuccess(button) {
   const icon = button.querySelector("use");
@@ -1802,370 +1658,38 @@ function flashRefreshSuccess(button) {
   refreshFlashTimers.set(button, timer);
 }
 
-// "" is the sentinel for "auto-follow" in the <select> — never a real
-// filesystem path, so it can't collide with an actual workspace's value.
-const AUTO_OPTION_VALUE = "";
-const LOCKED_WORKSPACE_KEY = "dsh-desktop-locked-workspace";
-
-// null = auto-follow (get_active_workspace's live, best-effort inference —
-// see its Rust-side doc comment for why that's a real ceiling, not a
-// shortcut); a string is the user's own pick from the panel's picker,
-// passed straight through as get_workspace_tree/get_git_status's
-// overridePath. Persisted so an explicit choice survives a restart, the
-// same pattern PROVIDER_TIP_DISMISSED_KEY already uses for a one-time
-// user decision.
-let lockedWorkspace = localStorage.getItem(LOCKED_WORKSPACE_KEY) || null;
-
-// Paths of directories the user explicitly expanded. Every directory starts
-// collapsed — landing on a big workspace fully unfolded is mostly noise —
-// so this only has to remember departures from that default. The tree is
-// rebuilt from scratch on every poll (see refreshTreeAndGitStatus's
-// replaceChildren), so without this an expanded folder would collapse back
-// within PANEL_POLL_MS of being opened.
+// The workspace-relative form of an absolute path, or null when no workspace
+// dsh knows about contains it.
 //
-// TreeEntry.path is workspace-RELATIVE (see panel.rs), so these keys are
-// only meaningful for the workspace they were expanded in — switching
-// workspaces must clear the set, or workspace B would silently inherit A's
-// expanded state for any same-relative-path directory (the same reason the
-// workspace-switch handler closes the open preview).
-const expandedDirs = new Set();
-
-// Which workspace the last-rendered tree belonged to: lockedWorkspace when
-// pinned, else the auto-follow resolution. A change clears expandedDirs.
-let renderedWorkspaceKey = null;
-
-function applyWorkspaceChange(workspaceKey) {
-  if (workspaceKey === null || workspaceKey === renderedWorkspaceKey) return;
-  renderedWorkspaceKey = workspaceKey;
-  expandedDirs.clear();
-}
-
-function renderTreeNode(entry, gitMap, container) {
-  const row = document.createElement("div");
-  row.className = "tree-row" + (entry.isDir ? " tree-dir" : " tree-file");
-  const status = gitMap.get(entry.path);
-  if (status && GIT_STATUS_CLASS[status]) row.classList.add(GIT_STATUS_CLASS[status]);
-  if (!entry.isDir && entry.path === currentPreviewPath) row.classList.add("tree-row-selected");
-
-  const hasChildren = entry.isDir && entry.children;
-  // Directories get a real disclosure caret (rotated via .tree-expanded,
-  // see styles.css); files get an equal-width blank spacer — a genuinely
-  // empty element, not a caret icon in a differently-colored class, so
-  // there's no icon to inherit stray color from — so a file's own icon
-  // still lines up in the same column as its siblings' carets rather than
-  // sitting one indent level to the left of them.
-  if (hasChildren) {
-    row.appendChild(iconEl("chevron-right", "tree-caret"));
-    // Default is collapsed; explicitly-expanded dirs render expanded from
-    // the start so the user's choice survives the periodic full rebuild.
-    row.classList.toggle("tree-expanded", expandedDirs.has(entry.path));
-  } else {
-    const spacer = document.createElement("span");
-    spacer.className = "tree-caret-spacer";
-    row.appendChild(spacer);
-  }
-  row.appendChild(iconEl(entry.isDir ? "folder" : "file", "tree-icon"));
-
-  const label = document.createElement("span");
-  label.className = "tree-label";
-  label.textContent = entry.name;
-  row.appendChild(label);
-
-  if (status && GIT_STATUS_LETTER[status]) {
-    const badge = document.createElement("span");
-    badge.className = "git-badge";
-    badge.textContent = GIT_STATUS_LETTER[status];
-    row.appendChild(badge);
-  }
-
-  container.appendChild(row);
-
-  // stopPropagation so this doesn't also bubble up to #panel-tree's own
-  // contextmenu listener (the "empty tree area" case, meaning "the
-  // workspace root") — a right-click that landed on an actual row always
-  // means that row's entry, never the root.
-  row.addEventListener("contextmenu", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    // Deliberately not awaited (the menu should open immediately, not wait
-    // on the file load) and deliberately not a toggle like the left-click
-    // handler above — right-clicking an already-previewed file should just
-    // leave it as-is, not close it.
-    if (!entry.isDir && currentPreviewPath !== entry.path) {
-      showPreview(entry.path).then(syncTreeSelectionHighlight);
-    }
-    openTreeContextMenu(e.clientX, e.clientY, { path: entry.path, isDir: entry.isDir });
-  });
-
-  // Every row can be dragged (moved elsewhere) and accepts a drop —
-  // #panel-tree's own dragover/drop listeners (wired in init()) cover
-  // dropping onto empty tree space, meaning the workspace root. A file row
-  // isn't itself a container, so it redirects a drop to its own parent
-  // (same folder the file already lives in) rather than either rejecting
-  // the drop outright or — the bug this replaced — silently bubbling up to
-  // #panel-tree's listener and moving into the root regardless of where in
-  // the tree the file actually was.
-  row.draggable = true;
-  row.addEventListener("dragstart", (e) => {
-    draggedTreePath = entry.path;
-    e.dataTransfer.effectAllowed = "move";
-    row.classList.add("tree-row-dragging");
-  });
-  row.addEventListener("dragend", () => {
-    draggedTreePath = null;
-    row.classList.remove("tree-row-dragging");
-  });
-  const dropTargetPath = entry.isDir ? entry.path : dirnameOf(entry.path);
-  // stopPropagation on all three regardless of entry.isDir — otherwise a
-  // drop that lands on any row, file or folder, would also bubble up to
-  // #panel-tree's own drop listener and fire performTreeMove a second
-  // time, with "" (the root) as the target.
-  row.addEventListener("dragover", (e) => {
-    if (draggedTreePath === null) return;
-    e.preventDefault();
-    e.stopPropagation();
-    // Only a folder is highlighted as the target — a file's own row
-    // redirecting elsewhere shouldn't visually read as "drop into this
-    // file".
-    if (entry.isDir) row.classList.add("tree-row-drop-target");
-  });
-  row.addEventListener("dragleave", (e) => {
-    e.stopPropagation();
-    row.classList.remove("tree-row-drop-target");
-  });
-  row.addEventListener("drop", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    row.classList.remove("tree-row-drop-target");
-    performTreeMove(draggedTreePath, dropTargetPath);
-  });
-
-  if (hasChildren) {
-    const childWrap = document.createElement("div");
-    childWrap.className = "tree-children";
-    if (!expandedDirs.has(entry.path)) childWrap.classList.add("collapsed");
-    container.appendChild(childWrap);
-    row.addEventListener("click", () => {
-      const collapsed = childWrap.classList.toggle("collapsed");
-      row.classList.toggle("tree-expanded", !collapsed);
-      if (collapsed) expandedDirs.delete(entry.path);
-      else expandedDirs.add(entry.path);
-    });
-    for (const child of entry.children) {
-      renderTreeNode(child, gitMap, childWrap);
-    }
-  } else if (!entry.isDir) {
-    // Selection lookup key for syncTreeSelectionHighlight() below — the
-    // click handler needs to find *this* row again from a live DOM query
-    // after an await, not from a closed-over reference that a concurrent
-    // poll-driven rebuild may have already detached.
-    row.dataset.path = entry.path;
-    row.addEventListener("click", async () => {
-      if (currentPreviewPath === entry.path) {
-        await closePreview();
-      } else {
-        await showPreview(entry.path);
-      }
-      syncTreeSelectionHighlight();
-    });
-  }
-}
-
-// Moves .tree-row-selected to match currentPreviewPath right now, instead of
-// leaving it to the next full tree rebuild — up to PANEL_POLL_MS away — to
-// pick up via renderTreeNode's own currentPreviewPath comparison above.
-// Re-queries the live DOM by data-path rather than operating on a specific
-// row element a caller might hand in: a poll can rebuild the tree out from
-// under an in-flight click (e.g. while confirmDiscardIfNeeded's dialog is
-// open), which would leave any captured row reference pointing at an
-// already-detached node.
-function syncTreeSelectionHighlight() {
-  const prev = els.panelTree.querySelector(".tree-row-selected");
-  if (prev) prev.classList.remove("tree-row-selected");
-  if (currentPreviewPath === null) return;
-  const row = els.panelTree.querySelector(`.tree-file[data-path="${CSS.escape(currentPreviewPath)}"]`);
-  if (row) row.classList.add("tree-row-selected");
-}
-
-// ── tree context menu (new/rename/delete/copy path/reveal) ──────────────
+// This is the one piece of workspace resolution left in this shell. It used
+// to back a manual workspace picker whose choice was threaded through every
+// panel command as `overridePath`; that picker is gone with the tree, so
+// file/git/preview commands now resolve their root server-side (see
+// panel.rs's `effective_workspace_dir`) and only the harness→shell
+// file-mention bridge still needs this — it arrives as an absolute OS path
+// and has to be turned back into the relative one `get_editable_preview`
+// takes.
 //
-// Built fresh into #tree-context-menu on every right-click rather than a
-// static template with per-item show/hide — see the HTML comment above
-// that element. `target` is { path, isDir } for a right-clicked row, or
-// null for empty tree space (meaning "the workspace root").
-
-function dirnameOf(relPath) {
-  const idx = relPath.lastIndexOf("/");
-  return idx === -1 ? "" : relPath.slice(0, idx);
+// Longest-root-prefix wins, so a workspace nested inside another workspace's
+// directory (however unusual) resolves to the more specific one rather than
+// whichever happened to come first in the list. Mirrors the same rule in
+// panel.rs's `workspace_containing`.
+function normalizeForCompare(p) {
+  return p.replace(/\\/g, "/").toLowerCase();
 }
 
-function parentDirFor(target) {
-  if (target === null) return "";
-  if (target.isDir) return target.path;
-  return dirnameOf(target.path);
-}
-
-// Set on dragstart, read by whichever row's drop handler fires — dataTransfer
-// itself can't be relied on here: most browsers only expose its actual
-// payload (getData) on the drop event, not during dragover, so this is the
-// one channel available for "what's actually being dragged" the whole time
-// a drag is in progress, including for the dragover highlight below.
-let draggedTreePath = null;
-
-async function performTreeMove(draggedPath, targetParentPath) {
-  if (draggedPath === null) return;
-  // Silent no-op, not a "already exists" error from move_entry — dropped
-  // back onto the folder it's already directly inside of.
-  if (dirnameOf(draggedPath) === targetParentPath) return;
-  try {
-    await invoke("move_entry", { path: draggedPath, toParentPath: targetParentPath, overridePath: lockedWorkspace });
-    if (targetParentPath !== "") expandedDirs.add(targetParentPath);
-    closePreviewIfAffected(draggedPath);
-    await refreshTreeAndGitStatus();
-  } catch (err) {
-    showAlertDialog(t("moveEntryFailed", err));
+function workspaceRelativePathFor(knownWorkspaces, absPath) {
+  const target = normalizeForCompare(absPath);
+  let best = null;
+  for (const ws of knownWorkspaces) {
+    const root = normalizeForCompare(ws.path).replace(/\/+$/, "");
+    if (target === root || target.startsWith(root + "/")) {
+      if (!best || root.length > normalizeForCompare(best.path).length) best = ws;
+    }
   }
-}
-
-// If the entry a rename/move/delete just affected was the open preview (or
-// a folder that contained it), the preview is now pointing at a path that
-// no longer exists there — closing it beats leaving a stale, unsaveable
-// editor open with no visible sign anything happened to its file.
-function closePreviewIfAffected(affectedRelPath) {
-  if (currentPreviewPath === null) return;
-  if (currentPreviewPath === affectedRelPath || currentPreviewPath.startsWith(affectedRelPath + "/")) {
-    closePreviewUnchecked();
-  }
-}
-
-function isTreeContextMenuOpen() {
-  return !els.treeContextMenu.classList.contains("hidden");
-}
-
-function closeTreeContextMenu() {
-  els.treeContextMenu.classList.add("hidden");
-}
-
-function addContextMenuItem(label, onClick, danger = false) {
-  const item = document.createElement("button");
-  item.className = "app-menu-item" + (danger ? " context-menu-item-danger" : "");
-  item.textContent = label;
-  item.addEventListener("click", () => {
-    closeTreeContextMenu();
-    onClick();
-  });
-  els.treeContextMenu.appendChild(item);
-}
-
-function addContextMenuSeparator() {
-  const sep = document.createElement("div");
-  sep.className = "app-menu-sep";
-  els.treeContextMenu.appendChild(sep);
-}
-
-async function createTreeEntry(isDir, target) {
-  const parentPath = parentDirFor(target);
-  const name = await showPromptDialog(t(isDir ? "newFolderNamePrompt" : "newFileNamePrompt"), "", t("create"));
-  if (name === null) return;
-  try {
-    await invoke(isDir ? "create_dir" : "create_file", { parentPath, name, overridePath: lockedWorkspace });
-    // So the new entry is actually visible after the refresh below instead
-    // of sitting inside a folder collapsed by default (see expandedDirs) —
-    // only meaningful when creating inside a real folder; parentPath === ""
-    // (workspace root) is never itself a collapsible row.
-    if (parentPath !== "") expandedDirs.add(parentPath);
-    await refreshTreeAndGitStatus();
-  } catch (err) {
-    showAlertDialog(t("createEntryFailed", err));
-  }
-}
-
-async function renameTreeEntry(target) {
-  const currentName = target.path.slice(target.path.lastIndexOf("/") + 1);
-  const newName = await showPromptDialog(t("renamePrompt"), currentName, t("rename"));
-  if (newName === null || newName === currentName) return;
-  try {
-    await invoke("rename_entry", { path: target.path, newName, overridePath: lockedWorkspace });
-    closePreviewIfAffected(target.path);
-    await refreshTreeAndGitStatus();
-  } catch (err) {
-    showAlertDialog(t("renameEntryFailed", err));
-  }
-}
-
-async function deleteTreeEntry(target) {
-  if (!(await showConfirmDialog(t("confirmDeleteEntry", target.path), t("deleteEntry"), true))) return;
-  try {
-    await invoke("delete_entry", { path: target.path, overridePath: lockedWorkspace });
-    closePreviewIfAffected(target.path);
-    await refreshTreeAndGitStatus();
-  } catch (err) {
-    showAlertDialog(t("deleteEntryFailed", err));
-  }
-}
-
-async function copyTreePath(target) {
-  try {
-    const abs = await invoke("get_absolute_path", { path: target.path, overridePath: lockedWorkspace });
-    await navigator.clipboard.writeText(abs);
-  } catch (err) {
-    showAlertDialog(t("copyPathFailed", err));
-  }
-}
-
-async function copyTreeRelativePath(target) {
-  try {
-    await navigator.clipboard.writeText(target.path);
-  } catch (err) {
-    showAlertDialog(t("copyPathFailed", err));
-  }
-}
-
-async function revealTreeEntry(target) {
-  try {
-    await invoke("reveal_in_file_manager", { path: target.path, overridePath: lockedWorkspace });
-  } catch (err) {
-    showAlertDialog(t("revealFailed", err));
-  }
-}
-
-async function openTreeEntry(target) {
-  try {
-    await invoke("open_with_default_app", { path: target.path, overridePath: lockedWorkspace });
-  } catch (err) {
-    showAlertDialog(t("openWithDefaultAppFailed", err));
-  }
-}
-
-function openTreeContextMenu(x, y, target) {
-  els.treeContextMenu.replaceChildren();
-  if (target !== null && !target.isDir) {
-    addContextMenuItem(t("openWithDefaultApp"), () => openTreeEntry(target));
-    addContextMenuSeparator();
-  }
-  addContextMenuItem(t("newFile"), () => createTreeEntry(false, target));
-  addContextMenuItem(t("newFolder"), () => createTreeEntry(true, target));
-  if (target !== null) {
-    addContextMenuSeparator();
-    addContextMenuItem(t("rename"), () => renameTreeEntry(target));
-    addContextMenuItem(t("deleteEntry"), () => deleteTreeEntry(target), true);
-    addContextMenuSeparator();
-    addContextMenuItem(t("copyPath"), () => copyTreePath(target));
-    addContextMenuItem(t("copyRelativePath"), () => copyTreeRelativePath(target));
-    addContextMenuItem(t("revealInFileManager"), () => revealTreeEntry(target));
-  }
-
-  // Positioned at the click point, then clamped so it can't render off the
-  // right/bottom edge of the window — measured after un-hiding (offsetWidth/
-  // Height are 0 on a display:none element).
-  els.treeContextMenu.classList.remove("hidden");
-  els.treeContextMenu.style.left = "0px";
-  els.treeContextMenu.style.top = "0px";
-  const rect = els.treeContextMenu.getBoundingClientRect();
-  const left = Math.min(x, window.innerWidth - rect.width - 4);
-  const top = Math.min(y, window.innerHeight - rect.height - 4);
-  els.treeContextMenu.style.left = `${Math.max(4, left)}px`;
-  els.treeContextMenu.style.top = `${Math.max(4, top)}px`;
+  if (!best) return null;
+  const root = best.path.replace(/\\/g, "/").replace(/\/+$/, "");
+  return absPath.replace(/\\/g, "/").slice(root.length).replace(/^\/+/, "");
 }
 
 // ── file preview / edit (CodeMirror) ────────────────────────────────────
@@ -2710,7 +2234,7 @@ async function embedLocalMarkdownImages(html, markdownPath) {
       const relPath = resolveMarkdownImageSrc(img.getAttribute("src"), markdownDir);
       if (relPath === null) return;
       try {
-        const preview = await invoke("get_editable_preview", { path: relPath, overridePath: lockedWorkspace });
+        const preview = await invoke("get_editable_preview", { path: relPath });
         if (preview.current?.kind === "image") {
           img.setAttribute("src", `data:${preview.current.mime};base64,${preview.current.base64}`);
         }
@@ -2785,7 +2309,7 @@ async function showPreview(path) {
   currentPreviewPath = path;
   markdownPreviewMode = false;
   els.cardFile.classList.remove("hidden");
-  syncCardResizeHandleVisibility();
+  syncPanelVisibility();
   els.panelPreviewTitle.textContent = path;
   els.panelPreviewTitle.title = path;
   destroyEditor();
@@ -2796,7 +2320,7 @@ async function showPreview(path) {
   els.panelPreviewBody.appendChild(loading);
 
   try {
-    const preview = await invoke("get_editable_preview", { path, overridePath: lockedWorkspace });
+    const preview = await invoke("get_editable_preview", { path });
     // A slower load may resolve after the user already clicked a different
     // file (or closed the preview) — never let a stale response overwrite
     // whatever's actually being shown now.
@@ -2818,7 +2342,7 @@ async function refreshCurrentPreview() {
   if (currentPreviewPath === null || isDirty()) return;
   const path = currentPreviewPath;
   try {
-    const preview = await invoke("get_editable_preview", { path, overridePath: lockedWorkspace });
+    const preview = await invoke("get_editable_preview", { path });
     if (currentPreviewPath !== path) return;
     // Skip the remount when the fetched text is identical to what's already
     // mounted — the common case on every 6s tick. mountEditor() always tears
@@ -2841,7 +2365,7 @@ async function refreshCurrentPreview() {
 
 // The actual teardown, without the confirm gate — for callers that already
 // ran confirmDiscardIfNeeded() themselves against the same dirty state a
-// moment earlier (see the workspace picker's change handler below), where
+// moment earlier (see handleFileMention's "no known workspace" branch), where
 // calling the checked closePreview() would ask the user to confirm the same
 // discard a second time.
 function closePreviewUnchecked() {
@@ -2849,7 +2373,7 @@ function closePreviewUnchecked() {
   destroyEditor();
   els.cardFile.classList.add("hidden");
   els.panelPreviewBody.replaceChildren();
-  syncCardResizeHandleVisibility();
+  syncPanelVisibility();
 }
 
 async function closePreview() {
@@ -2877,16 +2401,16 @@ async function saveCurrentEdit() {
   const diskContent = currentLineEnding === "\r\n" ? content.replace(/\n/g, "\r\n") : content;
   els.btnPreviewSave.disabled = true;
   try {
-    await invoke("save_file_content", { path, content: diskContent, overridePath: lockedWorkspace });
+    await invoke("save_file_content", { path, content: diskContent });
     currentSavedContent = content;
     setDirty(false);
-    // The tree's git-status coloring should reflect a just-saved change
-    // immediately, not after up to PANEL_POLL_MS — deliberately
-    // refreshTreeAndGitStatus(), not the full refreshPanel(): HEAD hasn't
-    // moved (a disk save isn't a commit), so the merge view's own gutter
-    // decorations don't need refetching, and re-mounting the editor here
-    // would reset cursor/scroll right after the user's own save action.
-    refreshTreeAndGitStatus();
+    // No refresh call here on purpose. This used to re-poll so the tree's
+    // git-status coloring picked up the just-saved change immediately; there
+    // is no tree to recolor now, the Diff view rebuilds from scratch on every
+    // open, and a save isn't a commit — so HEAD hasn't moved and the merge
+    // view's own gutter decorations don't need refetching either. What a
+    // refresh *would* do is remount the editor, resetting cursor and scroll
+    // right after the user's own save action.
   } catch (err) {
     // Left exactly as the user typed it on failure — nothing is discarded
     // on a failed write.
@@ -2896,102 +2420,16 @@ async function saveCurrentEdit() {
   }
 }
 
-// Rebuilds the picker's <option>s from the known-workspaces list plus the
-// auto-follow sentinel (whose label carries the live-resolved name, when
-// there is one, so auto mode stays informative without a second element).
-function renderWorkspaceOptions(knownWorkspaces, autoLabel) {
-  const select = els.panelWorkspaceSelect;
-  select.replaceChildren();
-
-  const autoOption = document.createElement("option");
-  autoOption.value = AUTO_OPTION_VALUE;
-  autoOption.textContent = autoLabel ? t("autoFollowWithLabel", autoLabel) : t("autoFollowSession");
-  select.appendChild(autoOption);
-
-  let lockedValueFound = lockedWorkspace === null;
-  for (const ws of knownWorkspaces) {
-    const option = document.createElement("option");
-    option.value = ws.path;
-    option.textContent = ws.title;
-    option.title = ws.path;
-    select.appendChild(option);
-    if (ws.path === lockedWorkspace) lockedValueFound = true;
-  }
-  // The locked path was picked from a list that has since changed (e.g. the
-  // workspace was removed/archived in the harness) — keep showing it rather
-  // than silently falling back, since the directory on disk hasn't gone
-  // anywhere; only the picker's own option list is stale.
-  if (!lockedValueFound) {
-    const staleOption = document.createElement("option");
-    staleOption.value = lockedWorkspace;
-    staleOption.textContent = lockedWorkspace;
-    select.appendChild(staleOption);
-  }
-
-  select.value = lockedWorkspace ?? AUTO_OPTION_VALUE;
-}
-
-// Split out from refreshPanel so saveCurrentEdit can refresh the tree's
-// git-status coloring right after a save without also re-mounting the
-// editor it just saved (see the comment on saveCurrentEdit).
-async function refreshTreeAndGitStatus() {
-  const knownWorkspacesPromise = invoke("get_known_workspaces").catch(() => []);
-
-  // Skipped entirely once the user has a manual pick locked in — there's
-  // nothing left to infer. Otherwise re-resolved every refresh, not just
-  // once at startup: the harness's own in-page workspace switcher, entirely
-  // inside the iframe with no signal reaching this shell directly, can
-  // change independently of anything else this shell observes.
-  let autoLabel = null;
-  if (lockedWorkspace === null) {
-    try {
-      autoLabel = await invoke("get_active_workspace");
-    } catch {
-      /* falls through with autoLabel null; the option keeps its static text */
-    }
-  }
-  renderWorkspaceOptions(await knownWorkspacesPromise, autoLabel);
-
-  // Collapse keys are workspace-relative: a different workspace means a
-  // fresh tree, so its collapse state starts empty. Covers both the manual
-  // picker and the auto-follow re-resolution above (autoLabel is the path
-  // get_active_workspace resolved; a transient failure keeps the old state
-  // rather than wiping it).
-  applyWorkspaceChange(lockedWorkspace ?? autoLabel);
-
-  try {
-    const treeArgs = { overridePath: lockedWorkspace };
-    const [tree, gitEntries] = await Promise.all([
-      invoke("get_workspace_tree", treeArgs),
-      invoke("get_git_status", treeArgs),
-    ]);
-    const gitMap = new Map(gitEntries.map((e) => [e.path, e.status]));
-    els.panelTree.replaceChildren();
-    if (tree.length === 0) {
-      const empty = document.createElement("p");
-      empty.className = "muted panel-empty";
-      empty.textContent = t("emptyWorkspace");
-      els.panelTree.appendChild(empty);
-    } else {
-      for (const entry of tree) {
-        renderTreeNode(entry, gitMap, els.panelTree);
-      }
-    }
-  } catch (err) {
-    els.panelTree.textContent = t("treeLoadFailed", err);
-  }
-}
-
 async function refreshPanel() {
-  await refreshTreeAndGitStatus();
   await refreshCurrentPreview();
 }
 
-// Cheap enough (one directory walk + one `git status`) to poll rather than
-// stand up a real filesystem watcher for this first slice — see the plan
-// note on deferring that complexity. Cleared on nothing; the container page
-// itself is never torn down, so this interval simply runs for the app's
-// whole lifetime.
+// Cheap enough for the one thing still polled — `git status`, which the Diff
+// view reads — rather than standing up a real filesystem watcher; the
+// preview itself gets re-fetched on the same tick (see refreshCurrentPreview)
+// because the agent is very plausibly editing the exact file being shown.
+// Cleared on nothing; the container page itself is never torn down, so this
+// interval simply runs for the app's whole lifetime.
 const PANEL_POLL_MS = 6000;
 
 // ── file-mention bridge (harness webview → dock) ────────────────────────
@@ -3007,103 +2445,38 @@ const PANEL_POLL_MS = 6000;
 // end of that bridge.
 //
 // The path arrives absolute (it's the button's own title attribute, an OS
-// path), but every panel command (get_workspace_tree/get_editable_preview/…)
-// takes a path relative to whichever workspace root is active — see
-// get_editable_preview's doc comment in lib.rs. So the workspace the file
-// belongs to has to be resolved here, from the absolute path, before
-// showPreview can be called at all.
-
-function normalizeForCompare(p) {
-  return p.replace(/\\/g, "/").toLowerCase();
-}
-
-// Longest-root-prefix wins, so a workspace nested inside another workspace's
-// directory (however unusual) still resolves to the more specific one
-// rather than whichever happened to come first in the list.
-function resolveWorkspaceForPath(knownWorkspaces, absPath) {
-  const target = normalizeForCompare(absPath);
-  let best = null;
-  for (const ws of knownWorkspaces) {
-    const root = normalizeForCompare(ws.path).replace(/\/+$/, "");
-    if (target === root || target.startsWith(root + "/")) {
-      if (!best || root.length > normalizeForCompare(best.path).length) best = ws;
-    }
-  }
-  return best;
-}
-
-// Same persistence side effects as the manual workspace picker's own change
-// handler above — just driven programmatically instead of by a user
-// selecting an <option>. Deliberately skips that handler's own
-// confirmDiscardIfNeeded() gate: showPreview() (called right after by
-// handleFileMention) already runs that same check against the file this
-// click is actually trying to open, so gating here too would just ask twice
-// for one discard decision.
-function lockWorkspace(path) {
-  lockedWorkspace = path;
-  localStorage.setItem(LOCKED_WORKSPACE_KEY, path);
-  els.panelWorkspaceSelect.value = path;
-}
-
-// Reveals a just-selected tree row: expands every collapsed ancestor
-// (directories default to collapsed — see expandedDirs — and otherwise stay
-// that way until a user fold/unfold, so an ancestor sitting collapsed here
-// is the common case, not an edge case) so the row is actually in the
-// visible/scrollable flow, not sitting inside a display:none .tree-children,
-// then scrolls it into view.
-function revealSelectedTreeRow() {
-  const row = els.panelTree.querySelector(".tree-row-selected");
-  if (!row) return;
-  let node = row.parentElement;
-  while (node && node !== els.panelTree) {
-    if (node.classList.contains("tree-children")) {
-      node.classList.remove("collapsed");
-      const caretRow = node.previousElementSibling;
-      if (caretRow) caretRow.classList.add("tree-expanded");
-    }
-    node = node.parentElement;
-  }
-  row.scrollIntoView({ block: "nearest" });
-}
-
+// path), but `get_editable_preview` takes a path relative to whichever
+// workspace root is active — see its doc comment in lib.rs. So the workspace
+// the file belongs to has to be resolved here, from the absolute path,
+// before showPreview can be called at all.
+//
+// The preview card is the one place a mention can land now that this shell
+// no longer draws a tree of its own: it used to open the dock on the Files
+// view and scroll the matching row into sight, which is moot when dsh's own
+// Sidebar owns the tree. Opening the editor over the currently-visible view
+// is the whole of it.
 async function handleFileMention(absPath) {
-  setDockView("files", { refresh: false });
-
   const knownWorkspaces = await invoke("get_known_workspaces").catch(() => []);
-  const workspace = resolveWorkspaceForPath(knownWorkspaces, absPath);
-  if (!workspace) {
-    // No known workspace claims this path — nothing to lock onto or
-    // convert a relative path against; surface it the same way an
-    // unreadable preview already does rather than silently doing nothing.
-    // Tears down whatever was previously open the same way closePreview()
-    // does — otherwise a stale editor instance (and its currentPreviewPath)
-    // would linger and get silently re-fetched/re-mounted by the next poll,
-    // clobbering this error message with unrelated old content.
+  const relPath = workspaceRelativePathFor(knownWorkspaces, absPath);
+  if (relPath === null) {
+    // No known workspace claims this path — nothing to convert a relative
+    // path against; surface it the same way an unreadable preview already
+    // does rather than silently doing nothing. Tears down whatever was
+    // previously open the same way closePreview() does — otherwise a stale
+    // editor instance (and its currentPreviewPath) would linger and get
+    // silently re-fetched/re-mounted by the next poll, clobbering this error
+    // message with unrelated old content.
     currentPreviewPath = null;
     destroyEditor();
     els.panelPreviewTitle.textContent = absPath;
     els.panelPreviewTitle.title = absPath;
     els.cardFile.classList.remove("hidden");
+    syncPanelVisibility();
     els.panelPreviewBody.textContent = t("fileNotInKnownWorkspace");
-    syncTreeSelectionHighlight();
     return;
   }
 
-  const root = workspace.path.replace(/\\/g, "/").replace(/\/+$/, "");
-  const relPath = absPath.replace(/\\/g, "/").slice(root.length).replace(/^\/+/, "");
-
-  if (workspace.path !== lockedWorkspace) {
-    lockWorkspace(workspace.path);
-  }
-  // showPreview() must land first — it's the only place that sets
-  // currentPreviewPath, and renderTreeNode (inside refreshTreeAndGitStatus)
-  // marks .tree-row-selected by comparing against that same value. Doing
-  // this in the other order renders the tree against whatever was
-  // *previously* open, so revealSelectedTreeRow() below would find a stale
-  // row (or none at all) instead of the file this click just opened.
   await showPreview(relPath);
-  await refreshTreeAndGitStatus();
-  revealSelectedTreeRow();
 }
 
 // The other end of the file-mention bridge is a Tauri event, emitted by
@@ -3124,9 +2497,6 @@ async function init() {
   applyStaticTranslations();
   applyPanelWidth();
   initResizeHandle();
-  applyCardFileHeight();
-  initCardsResizeHandle();
-  syncCardResizeHandleVisibility();
   initWindowChrome();
 
   // Keep the harness child webview glued to the content region and correctly
@@ -3248,7 +2618,6 @@ async function init() {
   els.btnLogs.addEventListener("click", toggleLogs);
   els.btnLogsStarting.addEventListener("click", toggleLogsStarting);
   els.btnOpenBrowser.addEventListener("click", () => invoke("open_in_browser"));
-  els.btnToolbarFiles.addEventListener("click", toggleDock);
   els.btnToolbarTerminal.addEventListener("click", toggleTerminal);
   els.btnToolbarDiff.addEventListener("click", toggleDiff);
   els.btnToolbarPlugins.addEventListener("click", togglePluginMarket);
@@ -3285,72 +2654,9 @@ async function init() {
   els.btnTerminalClose.addEventListener("click", () => {
     for (const id of [...terminalTabs.keys()]) closeTerminalTab(id);
   });
-  // Collapses the Files card's tree/picker body without closing the whole
-  // dock — independent from #card-file's own close button, per the "each
-  // card scrolls/collapses on its own" design.
-  els.btnFilesCollapse.addEventListener("click", () => {
-    const collapsed = els.cardFiles.classList.toggle("card-collapsed");
-    els.btnFilesCollapse
-      .querySelector("use")
-      .setAttribute("href", collapsed ? "#icon-chevron-down" : "#icon-chevron-up");
-    applyCardFileHeight();
-    syncCardResizeHandleVisibility();
-  });
-  els.btnPanelRefresh.addEventListener("click", async () => {
-    await refreshPanel();
-    flashRefreshSuccess(els.btnPanelRefresh);
-  });
   els.btnDiffRefresh.addEventListener("click", async () => {
     await refreshDiffView();
     flashRefreshSuccess(els.btnDiffRefresh);
-  });
-  // Empty tree space — a row's own contextmenu listener (renderTreeNode)
-  // stops propagation before this ever fires for a click that landed on an
-  // actual entry, so reaching here always means "the workspace root".
-  els.panelTree.addEventListener("contextmenu", (e) => {
-    e.preventDefault();
-    openTreeContextMenu(e.clientX, e.clientY, null);
-  });
-  // Drop-onto-empty-space = drop onto the workspace root — a drop that
-  // instead landed on a folder row never reaches here, its own drop
-  // listener (renderTreeNode) stops propagation first.
-  els.panelTree.addEventListener("dragover", (e) => {
-    if (draggedTreePath === null) return;
-    e.preventDefault();
-  });
-  els.panelTree.addEventListener("drop", (e) => {
-    e.preventDefault();
-    performTreeMove(draggedTreePath, "");
-  });
-  document.addEventListener("click", (e) => {
-    if (isTreeContextMenuOpen() && !els.treeContextMenu.contains(e.target)) closeTreeContextMenu();
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && isTreeContextMenuOpen()) closeTreeContextMenu();
-  });
-  els.panelWorkspaceSelect.addEventListener("change", async () => {
-    const value = els.panelWorkspaceSelect.value;
-    if (!(await confirmDiscardIfNeeded())) {
-      // The <select>'s own DOM value already changed on click, ahead of
-      // this handler — revert it to match the choice actually still in
-      // effect, or the control would show a selection the app never adopted.
-      els.panelWorkspaceSelect.value = lockedWorkspace ?? AUTO_OPTION_VALUE;
-      return;
-    }
-    lockedWorkspace = value === AUTO_OPTION_VALUE ? null : value;
-    if (lockedWorkspace === null) {
-      localStorage.removeItem(LOCKED_WORKSPACE_KEY);
-    } else {
-      localStorage.setItem(LOCKED_WORKSPACE_KEY, lockedWorkspace);
-    }
-    // An open preview's path is relative to whichever workspace was active
-    // when it was opened — re-resolving it against the new one could silently
-    // show an unrelated (or nonexistent) file of the same relative path.
-    // closePreviewUnchecked(), not closePreview(): the confirmDiscardIfNeeded()
-    // gate above already covers this same dirty state, so re-checking it here
-    // too would ask the user to confirm the same discard a second time.
-    closePreviewUnchecked();
-    refreshPanel();
   });
   els.btnPreviewClose.addEventListener("click", closePreview);
   els.btnPreviewSave.addEventListener("click", saveCurrentEdit);
